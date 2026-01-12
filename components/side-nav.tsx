@@ -190,7 +190,7 @@ export function SideNav({ userRole, userName, patientId, patientName }: SideNavP
 
             {/* Navigation */}
             <nav className={cn(
-                "flex-1 space-y-1 overflow-y-auto transition-[padding] duration-300 ease-in-out",
+                "flex-1 space-y-1 overflow-y-auto transition-[padding] duration-300 ease-in-out thin-scrollbar",
                 isCollapsed ? "p-2" : "p-4"
             )}>
                 {/* NAVIGATION Section */}

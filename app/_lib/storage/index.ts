@@ -92,6 +92,23 @@ export async function deleteFile(bucket: string, path: string) {
 }
 
 /**
+ * Delete multiple files from Supabase Storage (server-side only)
+ */
+export async function deleteFiles(bucket: string, paths: string[]) {
+  const supabase = createSupabaseStorageClient();
+
+  if (paths.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.storage.from(bucket).remove(paths);
+
+  if (error) {
+    throw new Error(`Failed to delete files: ${error.message}`);
+  }
+}
+
+/**
  * List files in a directory (server-side only)
  */
 export async function listFiles(

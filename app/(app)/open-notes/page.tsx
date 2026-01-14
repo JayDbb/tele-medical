@@ -13,7 +13,7 @@ export default async function OpenNotesPage() {
 
   // Redirect non-doctors to dashboard
   if (session.role !== "doctor") {
-    redirect("/dashboard");
+    redirect("/");
   }
 
   // Fetch open visits for the current clinician

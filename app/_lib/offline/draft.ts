@@ -118,8 +118,25 @@ export async function saveDraft(
   if (updates.audioPath !== undefined) {
     updated.audioPath = updates.audioPath;
   }
-  
+
   await db.draftVisits.update(draft.draftId, updated);
+}
+
+/**
+ * Get draft with pending operations
+ */
+export async function getDraftWithPendingOperations(
+  patientId: string,
+  userId: string
+): Promise<DraftVisit | null> {
+  const db = getOfflineDB();
+  
+  const draft = await db.draftVisits
+    .where("[userId+patientId]")
+    .equals([userId, patientId])
+    .first();
+  
+  return draft || null;
 }
 
 /**

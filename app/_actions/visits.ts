@@ -30,7 +30,7 @@ export async function createVisitDraftAction(params: {
   // Assign patient to the clinician - set both is_assigned and clinician_id
   await db
     .update(patients)
-    .set({ 
+    .set({
       isAssigned: true,
       clinicianId: user.id,
     })
@@ -68,12 +68,12 @@ export async function updateVisitDraftAction(
   // Get visit to get patientId
   const { getVisitById } = await import("@/app/_lib/db/drizzle/queries/visit");
   const visit = await getVisitById(visitId);
-  
+
   if (visit) {
     // Assign patient to the clinician - set both is_assigned and clinician_id
     await db
       .update(patients)
-      .set({ 
+      .set({
         isAssigned: true,
         clinicianId: user.id,
       })
@@ -100,7 +100,7 @@ export async function finalizeVisitAction(
   // Verify the user is the clinician assigned to the patient (not the visit)
   const { getVisitById } = await import("@/app/_lib/db/drizzle/queries/visit");
   const visit = await getVisitById(visitId);
-  
+
   if (!visit) {
     throw new Error("Visit not found");
   }
@@ -135,21 +135,29 @@ export async function finalizeVisitAction(
         const latestNote = visitNotes[0];
         if (latestNote.note && typeof latestNote.note === "object") {
           const noteData = latestNote.note as any;
-          
+
           // Sync all sections from visit note to patient record
-          const { syncVisitNoteToPatientAction } = await import("@/app/_actions/visit-sync");
-          const syncResult = await syncVisitNoteToPatientAction(visit.patientId, {
-            medications: noteData.medications,
-            vaccines: noteData.vaccines,
-            familyHistory: noteData.familyHistory,
-            surgicalHistory: noteData.surgicalHistory,
-            pastMedicalHistory: noteData.pastMedicalHistory,
-            riskFlags: noteData.riskFlags,
-            objective: noteData.objective,
-          });
-          
+          const { syncVisitNoteToPatientAction } = await import(
+            "@/app/_actions/visit-sync"
+          );
+          const syncResult = await syncVisitNoteToPatientAction(
+            visit.patientId,
+            {
+              medications: noteData.medications,
+              vaccines: noteData.vaccines,
+              familyHistory: noteData.familyHistory,
+              surgicalHistory: noteData.surgicalHistory,
+              pastMedicalHistory: noteData.pastMedicalHistory,
+              riskFlags: noteData.riskFlags,
+              objective: noteData.objective,
+            }
+          );
+
           if (syncResult.success) {
-            console.log("Visit note sections synced to patient record:", syncResult.results);
+            console.log(
+              "Visit note sections synced to patient record:",
+              syncResult.results
+            );
           }
         }
       }
@@ -188,7 +196,9 @@ export async function markVisitInProgressAction(
 ) {
   const user = await requireUser(["doctor", "nurse"]);
 
-  const { markVisitInProgress } = await import("@/app/_lib/db/drizzle/queries/visit");
+  const { markVisitInProgress } = await import(
+    "@/app/_lib/db/drizzle/queries/visit"
+  );
   await markVisitInProgress(visitId, user.id, reason);
 
   return { success: true };
@@ -204,7 +214,9 @@ export async function saveTranscriptAction(params: {
 }) {
   await requireUser(["doctor", "nurse"]);
 
-  const { createTranscript } = await import("@/app/_lib/db/drizzle/queries/transcripts");
+  const { createTranscript } = await import(
+    "@/app/_lib/db/drizzle/queries/transcripts"
+  );
   await createTranscript({
     visitId: params.visitId,
     text: params.text,
@@ -290,9 +302,16 @@ export async function updateVisitWaitingRoomAction(params: {
     .where(eq(notes.visitId, params.visitId));
 
   for (const note of visitNotes) {
-    const { addAuditLogEntry } = await import("@/app/_lib/db/drizzle/queries/visit");
+    const { addAuditLogEntry } = await import(
+      "@/app/_lib/db/drizzle/queries/visit"
+    );
     // Map status for display
-    const fromStatusDisplay = fromStatus === "draft" || fromStatus === "in_progress" ? "In Progress" : fromStatus === "finalized" || fromStatus === "signed" ? "Signed & Complete" : fromStatus;
+    const fromStatusDisplay =
+      fromStatus === "draft" || fromStatus === "in_progress"
+        ? "In Progress"
+        : fromStatus === "finalized" || fromStatus === "signed"
+        ? "Signed & Complete"
+        : fromStatus;
     await addAuditLogEntry(
       note.id,
       user.id,
@@ -312,9 +331,9 @@ export async function updateVisitWaitingRoomAction(params: {
  */
 export async function getPatientOpenVisitAction(patientId: string) {
   await requireUser(["doctor", "nurse"]);
-  
+
   const openVisit = await getPatientOpenVisit(patientId);
-  
+
   return { visit: openVisit };
 }
 
@@ -328,7 +347,7 @@ export async function assignVisitToMeAction(visitId: string) {
   // Get visit to get patientId
   const { getVisitById } = await import("@/app/_lib/db/drizzle/queries/visit");
   const visit = await getVisitById(visitId);
-  
+
   if (!visit) {
     throw new Error("Visit not found");
   }
@@ -347,16 +366,12 @@ export async function assignVisitToMeAction(visitId: string) {
     .limit(1);
   const userName = userResult[0]?.name || userResult[0]?.email || null;
 
-  // For virtual appointments, keep isAssigned as false so patient stays in waiting room
-  // For non-virtual, set isAssigned to true
-  const isVirtual = visit.appointmentType?.toLowerCase() === "virtual";
-  
-  // Update patient assignment
+  // Update patient assignment - mark as assigned when doctor takes the visit
   await db
     .update(patients)
-    .set({ 
-      isAssigned: isVirtual ? false : true, // Keep false for virtual so they stay in waiting room
-      clinicianId: isVirtual ? null : user.id, // Keep null for virtual until call starts
+    .set({
+      isAssigned: true, // Mark patient as assigned when visit is assigned to doctor
+      clinicianId: user.id, // Set clinician assignment
     })
     .where(eq(patients.id, visit.patientId));
 
@@ -386,9 +401,18 @@ export async function assignVisitToMeAction(visitId: string) {
     .where(eqImport(notes.visitId, visitId));
 
   for (const note of visitNotes) {
-    const { addAuditLogEntry } = await import("@/app/_lib/db/drizzle/queries/visit");
+    const { addAuditLogEntry } = await import(
+      "@/app/_lib/db/drizzle/queries/visit"
+    );
     // Map status for display
-    const fromStatusDisplay = fromStatus === "draft" || fromStatus === "in_progress" ? "In Progress" : fromStatus === "Waiting" || fromStatus === "waiting" ? "Waiting" : fromStatus === "finalized" || fromStatus === "signed" ? "Signed & Complete" : fromStatus;
+    const fromStatusDisplay =
+      fromStatus === "draft" || fromStatus === "in_progress"
+        ? "In Progress"
+        : fromStatus === "Waiting" || fromStatus === "waiting"
+        ? "Waiting"
+        : fromStatus === "finalized" || fromStatus === "signed"
+        ? "Signed & Complete"
+        : fromStatus;
     await addAuditLogEntry(
       note.id,
       user.id,
@@ -403,20 +427,27 @@ export async function assignVisitToMeAction(visitId: string) {
   // Handle virtual appointments - create Twilio room and generate join link
   let joinUrl: string | null = null;
   let patientJoinToken: string | null = null;
-  
+
   if (visit.appointmentType?.toLowerCase() === "virtual") {
     try {
       const { ensureTwilioRoom } = await import("@/app/_lib/twilio/video");
-      const { generatePatientJoinToken } = await import("@/app/_lib/twilio/video");
-      const { sendPatientSMS, sendPatientEmail } = await import("@/app/_lib/twilio/messaging");
+      const { generatePatientJoinToken } = await import(
+        "@/app/_lib/twilio/video"
+      );
+      const { sendPatientSMS, sendPatientEmail } = await import(
+        "@/app/_lib/twilio/messaging"
+      );
 
       // Create or get Twilio room
       const roomName = `visit-${visitId}`;
-      const { roomSid, roomName: finalRoomName } = await ensureTwilioRoom(roomName);
+      const { roomSid, roomName: finalRoomName } = await ensureTwilioRoom(
+        roomName
+      );
 
       // Generate patient join token
       patientJoinToken = generatePatientJoinToken(visitId, "24h");
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
       joinUrl = `${baseUrl}/join/${patientJoinToken}`;
 
       // Update visit with Twilio room info
@@ -444,7 +475,7 @@ export async function assignVisitToMeAction(visitId: string) {
   const { revalidatePath } = await import("next/cache");
   revalidatePath("/waiting-room");
 
-  return { 
+  return {
     success: true,
     isVirtual: visit.appointmentType?.toLowerCase() === "virtual",
     joinUrl: joinUrl || null,
@@ -457,7 +488,9 @@ export async function assignVisitToMeAction(visitId: string) {
 export async function getClinicianOpenVisitsAction() {
   const user = await requireUser(["doctor", "nurse"]);
 
-  const { getClinicianOpenVisits } = await import("@/app/_lib/db/drizzle/queries/visit");
+  const { getClinicianOpenVisits } = await import(
+    "@/app/_lib/db/drizzle/queries/visit"
+  );
   const visits = await getClinicianOpenVisits(user.id);
 
   return { visits };

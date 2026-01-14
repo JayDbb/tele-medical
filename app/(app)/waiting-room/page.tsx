@@ -12,9 +12,9 @@ export default async function WaitingRoomPage() {
         redirect("/sign-in");
     }
 
-    // Redirect non-doctors to dashboard
-    if (session.role !== "doctor") {
-        redirect("/dashboard");
+    // Redirect non-doctors and non-nurses to dashboard
+    if (session.role !== "doctor" && session.role !== "nurse") {
+        redirect("/");
     }
 
     // Fetch unassigned patients with visit information

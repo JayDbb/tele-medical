@@ -42,9 +42,31 @@ CRITICAL EXTRACTION RULES:
 3. If the transcript mentions "heart rate of 100", extract it as "hr": "100"
 4. If the transcript mentions "7 feet tall", convert to cm: 7 * 30.48 = 213.36, extract as "height": "213.36"
 5. If the transcript mentions weight, extract as pounds (numeric only, no "lbs" text)
-5. If the transcript mentions medications, create an array entry for EACH medication
-6. If the transcript mentions conditions, diagnoses, or complaints, extract them to the appropriate fields
-7. Extract measurements, vitals, and any numerical values mentioned
+6. If the transcript mentions medications, create an array entry for EACH medication
+7. If the transcript mentions conditions, diagnoses, or complaints, extract them to the appropriate fields
+8. Extract measurements, vitals, and any numerical values mentioned
+9. DATE CONVERSION: Convert relative dates to actual dates in YYYY-MM-DD format:
+   - The current date will be provided in the prompt - use it to calculate relative dates
+   - Calculate dates relative to TODAY (the current date provided)
+   - Examples of relative date conversions:
+     * "a month ago" or "1 month ago" → Subtract 1 month from current date (e.g., if today is 2024-12-15, "a month ago" = 2024-11-15)
+     * "2 months ago" → Subtract 2 months from current date
+     * "about a month ago" → Subtract 1 month from current date
+     * "a week ago" or "1 week ago" → Subtract 7 days from current date
+     * "2 weeks ago" → Subtract 14 days from current date
+     * "3 weeks ago" → Subtract 21 days from current date
+     * "a year ago" or "1 year ago" → Subtract 1 year from current date
+     * "2 years ago" → Subtract 2 years from current date
+     * "last month" → First day of previous month (e.g., if today is 2024-12-15, "last month" = 2024-11-01)
+     * "last year" → Same date in previous year (e.g., if today is 2024-12-15, "last year" = 2023-12-15)
+     * "yesterday" → Subtract 1 day from current date
+     * "last week" → Subtract 7 days from current date
+     * "a few months ago" → Approximate as 2-3 months ago (use 2 months for calculation)
+     * "several weeks ago" → Approximate as 3-4 weeks ago (use 3 weeks for calculation)
+   - Always use YYYY-MM-DD format (e.g., "2024-01-15")
+   - If only a month/year is mentioned (e.g., "January 2024"), use the first day: "2024-01-01"
+   - If an exact date is mentioned (e.g., "January 15th, 2024"), convert to: "2024-01-15"
+   - Be smart about context: "got a vaccine about a month ago" means calculate the date 1 month before the current date
 
 UNIT REQUIREMENTS:
 - Weight: Always extract as POUNDS (numeric only, no "lbs" text). If given in kg, convert (1 kg = 2.20462 lbs)
@@ -64,15 +86,54 @@ EXAMPLES:
   → Extract: medications: [{"name": "Metformin 500mg", "dosage": "twice daily", ...}]
 - Transcript: "Patient complains of chest pain" 
   → Extract: subjective.chiefComplaint: "chest pain"
+- Transcript: "Fasting glucose was 95, HbA1c is 7.2% from last month" 
+  → Extract: pointOfCare.diabetes.fastingGlucose: "95", pointOfCare.diabetes.hbA1cValue: "7.2", pointOfCare.diabetes.hbA1cDate: "YYYY-MM-DD" (calculate: today minus 1 month)
+- Transcript: "Patient got the flu vaccine about a month ago" 
+  → Extract: vaccines: [{"name": "Flu vaccine", "date": "YYYY-MM-DD"}] (calculate: today minus 1 month)
+- Transcript: "Surgery was done 2 years ago" 
+  → Extract: surgicalHistory: [{"procedure": "...", "date": "YYYY-MM-DD"}] (calculate: today minus 2 years)
+- Transcript: "Diagnosed with diabetes 3 weeks ago" 
+  → Extract: pastMedicalHistory: [{"condition": "diabetes", "diagnosedDate": "YYYY-MM-DD"}] (calculate: today minus 21 days)
+- Transcript: "HIV test came back negative" 
+  → Extract: pointOfCare.hiv: "negative"
+- Transcript: "Syphilis test was positive and reactive" 
+  → Extract: pointOfCare.syphilis: {"result": "positive", "reactivity": "reactive"}
+- Transcript: "Syphilis screening was non-reactive" 
+  → Extract: pointOfCare.syphilis: {"result": "", "reactivity": "non-reactive"}
+- Transcript: "Physical exam: Patient appears well. Heart regular rate and rhythm, no murmurs. Lungs clear bilaterally. Abdomen soft, non-tender. Skin clear." 
+  → Extract: examFindings: {"general": "Patient appears well", "cardiovascular": "Regular rate and rhythm, no murmurs", "lungs": "Clear bilaterally", "abdomen": "Soft, non-tender", "skin": "Clear", "heent": "", "neck": "", "musculoskeletal": "", "neurologic": ""}
 
 IMPORTANT INSTRUCTIONS:
-- Extract ALL information mentioned in the transcript, including medications, vaccines, family history, surgical history, past medical history, and orders
-- For medications: Create an array entry for EACH medication mentioned, with name, dosage, and any related information
-- For vaccines: Extract each vaccine mentioned with its details (name, date, dose, site, route, lot number, manufacturer)
+- Extract ALL information mentioned in the transcript, including medications, vaccines, family history, surgical history, past medical history, orders, and point of care tests
+- For medications: Create an array entry for EACH medication mentioned. Include brand name, dosage, frequency, and any related information. If a medication is linked to a specific diagnosis, you can include that in the notes field. Note: Medications can also be included within assessmentPlan entries for diagnosis-specific medications.
+- For vaccines: Extract each vaccine mentioned with its details (name, date, dose, site, route, lot number, manufacturer). Convert relative dates (e.g., "a month ago", "2 weeks ago") to actual dates in YYYY-MM-DD format
 - For family history: Extract each family member's medical history mentioned
-- For surgical history: Extract each surgery/procedure mentioned
-- For past medical history: Extract each condition mentioned
+- For surgical history: Extract each surgery/procedure mentioned. Convert relative dates (e.g., "2 years ago", "last year") to actual dates in YYYY-MM-DD format
+- For past medical history: Extract each condition mentioned. Convert relative dates (e.g., "diagnosed 3 weeks ago", "a year ago") to actual dates in YYYY-MM-DD format for diagnosedDate
 - For orders: Extract each order/prescription/test ordered
+- For assessment & plan: Create an array entry for EACH diagnosis/condition mentioned. Each entry should include:
+  * assessment: Diagnosis with ICD-10 code if mentioned (e.g., "Acute Otitis Media – New (H66.90)")
+  * plan: Treatment plan summary (e.g., "Start antibiotics.")
+  * medications: Array of medications prescribed for this diagnosis (include full details: name, dosage, frequency)
+  * orders: Array of orders/prescriptions/tests for this diagnosis
+  * followUp: Follow-up instructions (e.g., "PRN if no improvement in 48 hours")
+  * education: Patient education provided (e.g., "Discussed expected course and return precautions.")
+  * coordination: Care coordination notes (e.g., "None" or referral details)
+  Example: [{"assessment": "Acute Otitis Media – New (H66.90)", "plan": "Start antibiotics.", "medications": [{"brandName": "Amoxicillin 400 mg/5 mL", "dosage": "7.5 mL", "frequency": "PO BID x 10 days"}], "orders": [], "followUp": "PRN if no improvement in 48 hours", "education": "Discussed expected course and return precautions.", "coordination": "None"}]
+- For point of care tests:
+  * Diabetes: Extract all diabetes-related information (glucose levels, HbA1c, monitoring, exams, etc.)
+  * HIV: Extract HIV test results as "negative" or "positive" (e.g., "HIV test was negative" → "hiv": "negative")
+  * Syphilis: Extract syphilis test results - result should be "positive" or "negative", reactivity should be "reactive" or "non-reactive" (e.g., "Syphilis test was positive and reactive" → "syphilis": {"result": "positive", "reactivity": "reactive"})
+- For physical examination findings: Organize findings into appropriate categories:
+  * General: General appearance, alertness, level of distress, nutritional status, etc.
+  * HEENT: Head, Eyes (pupils, EOM, fundoscopic), Ears (tympanic membranes), Nose, Throat examination
+  * Neck: Neck examination, lymph nodes, thyroid, masses, range of motion, etc.
+  * Cardiovascular: Heart sounds, rhythm, murmurs, pulses, JVD, peripheral edema, etc.
+  * Lungs: Respiratory rate, breath sounds, wheezes, rales, percussion, etc.
+  * Abdomen: Inspection, auscultation (bowel sounds), palpation, percussion, organomegaly, etc.
+  * Musculoskeletal: Range of motion, strength, deformities, gait, etc.
+  * Neurologic: Mental status, cranial nerves, reflexes, sensation, coordination, gait, etc.
+  * Skin: Rashes, lesions, color, temperature, turgor, etc.
 
 Schema:
 {
@@ -86,7 +147,17 @@ Schema:
     "temp": "",            // Temperature (e.g., "98.6")
     "weight": "",          // Weight in POUNDS - numeric value only, NO unit text (e.g., "170" not "170 lbs")
     "height": "",          // Height in CENTIMETERS - numeric value only, NO unit text (e.g., "178" not "178 cm"). Convert from feet/inches if needed (1 foot = 30.48 cm, 1 inch = 2.54 cm)
-    "examFindings": "",    // Physical examination findings
+    "examFindings": {     // Physical examination findings organized by system
+      "general": "",      // General appearance, alertness, distress, etc.
+      "heent": "",        // Head, Eyes, Ears, Nose, Throat examination
+      "neck": "",         // Neck examination, lymph nodes, thyroid, etc.
+      "cardiovascular": "", // Heart, pulses, JVD, edema, etc.
+      "lungs": "",        // Respiratory examination, breath sounds, etc.
+      "abdomen": "",      // Abdominal examination, bowel sounds, etc.
+      "musculoskeletal": "", // Musculoskeletal examination, range of motion, etc.
+      "neurologic": "",   // Neurologic examination, reflexes, sensation, etc.
+      "skin": ""          // Skin examination, rashes, lesions, etc.
+    },
     "visionOd": "",        // Vision right eye
     "visionOs": "",        // Vision left eye
     "visionOu": "",        // Vision both eyes
@@ -96,36 +167,67 @@ Schema:
     "visionPain": "",       // "Yes" | "No" | ""
     "visionLastExamDate": "" // YYYY-MM-DD format
   },
-  "diabetes": { 
-    "fastingGlucose": "",      // Fasting blood glucose
-    "randomGlucose": "",       // Random blood glucose
-    "hbA1cValue": "",          // HbA1c value (e.g., "7.2")
-    "hbA1cDate": "",           // HbA1c date (YYYY-MM-DD)
-    "homeMonitoring": "",      // Home glucose monitoring info
-    "averageReadings": "",     // Average glucose readings
-    "hypoglycemiaEpisodes": "", // Hypoglycemia episodes
-    "hyperglycemiaSymptoms": "", // Hyperglycemia symptoms
-    "footExam": "",            // Foot exam findings
-    "eyeExamDue": ""           // Eye exam due date (YYYY-MM-DD)
+  "pointOfCare": {
+    "diabetes": { 
+      "fastingGlucose": "",      // Fasting blood glucose
+      "randomGlucose": "",       // Random blood glucose
+      "hbA1cValue": "",          // HbA1c value (e.g., "7.2")
+      "hbA1cDate": "",           // HbA1c date (YYYY-MM-DD)
+      "homeMonitoring": "",      // Home glucose monitoring info
+      "averageReadings": "",     // Average glucose readings
+      "hypoglycemiaEpisodes": "", // Hypoglycemia episodes
+      "hyperglycemiaSymptoms": "", // Hyperglycemia symptoms
+      "footExam": "",            // Foot exam findings
+      "eyeExamDue": ""           // Eye exam due date (YYYY-MM-DD)
+    },
+    "hiv": "",                    // "negative" or "positive"
+    "syphilis": {
+      "result": "",              // "positive" or "negative"
+      "reactivity": ""           // "reactive" or "non-reactive"
+    }
   },
-  "medications": [  // ARRAY: One entry per medication mentioned
+  "medications": [  // ARRAY: One entry per medication mentioned (can include linked diagnosis in notes)
     {
-      "name": "",              // Medication name (e.g., "Metformin 500mg")
+      "brandName": "",         // Medication name (e.g., "Metformin 500mg")
+      "strength": "",          // Strength if separate
+      "form": "",              // Form if separate
       "dosage": "",            // Dosage instructions (e.g., "1 tablet twice daily")
-      "takingAsPrescribed": false,  // true if patient is taking as prescribed
-      "missedDoses": false,    // true if patient missed doses
-      "sideEffects": false,    // true if patient reports side effects
-      "sideEffectsNotes": ""   // Details about side effects if any
+      "frequency": "",         // Frequency if separate
+      "status": "Active",      // "Active" | "Inactive" | "Discontinued"
+      "notes": ""              // Notes (can include linked diagnosis if mentioned)
     }
   ],
-  "assessmentPlan": { 
-    "assessment": "",  // Clinical assessment/diagnosis
-    "plan": ""        // Treatment plan
-  },
+  "assessmentPlan": [  // ARRAY: One entry per diagnosis/condition with detailed plan
+    {
+      "assessment": "",  // Clinical assessment/diagnosis with ICD-10 (e.g., "Acute Otitis Media – New (H66.90)")
+      "plan": "",        // Treatment plan summary (e.g., "Start antibiotics.")
+      "medications": [   // Medications linked to this diagnosis
+        {
+          "brandName": "",  // Medication name (e.g., "Amoxicillin 400 mg/5 mL")
+          "strength": "",   // Strength if separate
+          "form": "",       // Form if separate
+          "dosage": "",     // Dosage (e.g., "7.5 mL")
+          "frequency": ""   // Frequency (e.g., "PO BID x 10 days")
+        }
+      ],
+      "orders": [        // Orders linked to this diagnosis
+        {
+          "type": "",
+          "priority": "",
+          "details": "",
+          "status": "",
+          "dateOrdered": ""
+        }
+      ],
+      "followUp": "",    // Follow-up instructions (e.g., "PRN if no improvement in 48 hours")
+      "education": "",    // Patient education (e.g., "Discussed expected course and return precautions.")
+      "coordination": "" // Care coordination (e.g., "None")
+    }
+  ],
   "vaccines": [  // ARRAY: One entry per vaccine mentioned
     {
       "name": "",        // Vaccine name (e.g., "COVID-19", "Flu")
-      "date": "",        // Date given (YYYY-MM-DD)
+      "date": "",        // Date given (YYYY-MM-DD) - Convert relative dates like "a month ago" to actual date
       "dose": "",        // Dose number (e.g., "1st dose", "Booster")
       "site": "",        // Injection site (e.g., "Left deltoid")
       "route": "",       // Route (e.g., "IM", "Subcutaneous")
@@ -151,7 +253,7 @@ Schema:
   "surgicalHistory": [  // ARRAY: One entry per surgery/procedure mentioned
     {
       "procedure": "",    // Procedure name
-      "date": "",         // Date (YYYY-MM-DD)
+      "date": "",         // Date (YYYY-MM-DD) - Convert relative dates like "2 years ago" to actual date
       "site": "",         // Site/location
       "surgeon": "",      // Surgeon name if mentioned
       "outcome": "",      // Outcome/results
@@ -162,7 +264,7 @@ Schema:
     {
       "condition": "",      // Condition name
       "status": "",         // Status (e.g., "Active", "Resolved", "Chronic")
-      "diagnosedDate": "",  // Date diagnosed (YYYY-MM-DD)
+      "diagnosedDate": "",  // Date diagnosed (YYYY-MM-DD) - Convert relative dates like "3 weeks ago" to actual date
       "impact": "",         // Impact on patient
       "icd10": "",          // ICD-10 code if mentioned
       "source": ""          // Source of information
@@ -201,15 +303,19 @@ Schema:
     prompt ||
     `Extract structured visit note data from this medical transcript.${contextPrompt}${previousTranscriptsContext}\n\nTranscript:\n${transcript}`;
 
+  // Get current date for relative date calculations
+  const today = new Date();
+  const currentDateStr = today.toISOString().split("T")[0]; // YYYY-MM-DD format
+
   // Use provided prompt or default
   const basePrompt =
     prompt ||
-    `Parse this medical visit transcript into the structured JSON schema below.${contextPrompt}${previousTranscriptsContext}\n\nIMPORTANT: The NEW transcript below takes precedence over any previous transcripts. Only use previous transcripts for additional context.`;
+    `Parse this medical visit transcript into the structured JSON schema below.${contextPrompt}${previousTranscriptsContext}\n\nIMPORTANT: The NEW transcript below takes precedence over any previous transcripts. Only use previous transcripts for additional context.\n\nCURRENT DATE: ${currentDateStr} - Use this date to calculate relative dates (e.g., "a month ago" = ${currentDateStr} minus 1 month).`;
 
   // Combine system prompt with user prompt
   // The system prompt contains the schema and instructions
   // The user prompt contains the transcript to parse
-  const combinedUserPrompt = `${basePrompt}\n\nNEW Transcript (takes precedence - extract all information from this):\n${transcript}\n\nNow extract all information from the transcript above and populate the JSON schema. Be thorough and extract ALL mentioned information including vitals, measurements, medications, diagnoses, etc.`;
+  const combinedUserPrompt = `${basePrompt}\n\nNEW Transcript (takes precedence - extract all information from this):\n${transcript}\n\nNow extract all information from the transcript above and populate the JSON schema. Be thorough and extract ALL mentioned information including vitals, measurements, medications, diagnoses, point of care test results (diabetes, HIV, syphilis), etc.`;
 
   // DeepSeek on Replicate expects the full prompt including system instructions
   const fullPrompt = `${systemPrompt}\n\n${combinedUserPrompt}`;
@@ -305,9 +411,7 @@ Schema:
       // Validate and return parsed note
       return parseVisitNote(parsed);
     } else if (status.status === "failed" || status.status === "canceled") {
-      throw new Error(
-        `Parsing failed: ${status.error || "Unknown error"}`
-      );
+      throw new Error(`Parsing failed: ${status.error || "Unknown error"}`);
     }
 
     attempts++;
@@ -315,4 +419,3 @@ Schema:
 
   throw new Error("Parsing timed out");
 }
-

@@ -9,7 +9,7 @@ interface NewVisitPageProps {
   searchParams: Promise<{ visitId?: string }>;
 }
 
-export default async function NewVisitPage({ 
+export default async function NewVisitPage({
   params,
   searchParams,
 }: NewVisitPageProps) {
@@ -25,7 +25,7 @@ export default async function NewVisitPage({
 
   // Allow doctors and nurses
   if (user.role !== "doctor" && user.role !== "nurse") {
-    redirect("/dashboard");
+    redirect("/");
   }
 
   // Get patient basics

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { _convertToMP3Internal } from "@/app/_lib/utils/audioConverter";
+import { _convertToMP3Internal, preloadLamejs } from "@/app/_lib/utils/audioConverter";
 import { storeFile } from "@/app/_lib/offline/files";
 import { toast } from "sonner";
 
@@ -42,6 +42,15 @@ export function AICapturePanel({
     const chunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Pre-load lamejs when component mounts (if online)
+    React.useEffect(() => {
+        if (navigator.onLine) {
+            preloadLamejs().catch((error) => {
+                console.warn("Failed to preload lamejs:", error);
+            });
+        }
+    }, []);
 
     // Recording functions
     const startRecording = async () => {
@@ -106,100 +115,208 @@ export function AICapturePanel({
         try {
             setProgress(20);
 
-            // Convert to MP3
-            const mp3Blob = await _convertToMP3Internal(audioBlob);
-            setProgress(40);
+            // Try to convert to MP3, but handle failures gracefully
+            let processedBlob: Blob = audioBlob;
+            let fileExtension = "webm";
+            let mimeType = audioBlob.type || "audio/webm";
+            
+            try {
+                processedBlob = await _convertToMP3Internal(audioBlob);
+                fileExtension = "mp3";
+                mimeType = "audio/mpeg";
+                setProgress(40);
+            } catch (conversionError: any) {
+                // If conversion fails (e.g., offline, chunk load error), use original format
+                console.warn("MP3 conversion failed, using original format:", conversionError);
+                if (conversionError.message?.includes("offline") || conversionError.message?.includes("chunk")) {
+                    toast.warning("MP3 conversion unavailable. Storing audio in original format.");
+                }
+                // Continue with original blob
+                setProgress(40);
+            }
 
-            // Store file locally
-            const file = new File([mp3Blob], `recording-${Date.now()}.mp3`, {
-                type: "audio/mpeg",
+            // Store file locally FIRST (always, even if online)
+            const file = new File([processedBlob], `recording-${Date.now()}.${fileExtension}`, {
+                type: mimeType,
             });
             const fileId = await storeFile(file);
             setProgress(60);
 
-            // Upload to Supabase Storage via server endpoint (bypasses RLS)
-            setState("uploading");
-            const path = `visits/${patientId}/${fileId}/${Date.now()}.mp3`;
+            const isOnline = navigator.onLine;
+            const path = `visits/${patientId}/${fileId}/${Date.now()}.${fileExtension}`;
+            let audioPath: string | null = null;
 
-            const uploadFormData = new FormData();
-            uploadFormData.append("file", mp3Blob, `recording-${Date.now()}.mp3`);
-            uploadFormData.append("path", path);
+            // Try to upload if online
+            if (isOnline) {
+                try {
+                    setState("uploading");
+                    const uploadFormData = new FormData();
+                    uploadFormData.append("file", processedBlob, `recording-${Date.now()}.${fileExtension}`);
+                    uploadFormData.append("path", path);
 
-            const uploadResponse = await fetch("/api/upload/audio", {
-                method: "POST",
-                body: uploadFormData,
-            });
+                    const uploadResponse = await fetch("/api/upload/audio", {
+                        method: "POST",
+                        body: uploadFormData,
+                    });
 
-            if (!uploadResponse.ok) {
-                const error = await uploadResponse.json();
-                throw new Error(error.error || "Upload failed");
+                    if (uploadResponse.ok) {
+                        const uploadData = await uploadResponse.json();
+                        audioPath = uploadData.path || path;
+                    } else {
+                        // Upload failed, will queue for retry
+                        throw new Error("Upload failed");
+                    }
+                } catch (uploadError) {
+                    console.warn("Upload failed, will retry when online:", uploadError);
+                    // Continue to queue transcription
+                }
             }
 
-            const uploadData = await uploadResponse.json();
-            // Use the path from the upload response (this is the path within the bucket)
-            const audioPath = uploadData.path || path;
-
-            console.log("Upload response:", uploadData);
-            console.log("Using audio path for transcription:", audioPath);
+            // If upload failed or offline, queue transcription for later
+            if (!audioPath) {
+                const { saveDraft } = await import("@/app/_lib/offline/draft");
+                const { getOfflineDB } = await import("@/app/_lib/offline/db");
+                
+                const db = getOfflineDB();
+                const draft = await db.draftVisits
+                    .where("patientId")
+                    .equals(patientId)
+                    .first();
+                
+                if (draft) {
+                    await db.draftVisits.update(draft.draftId, {
+                        pendingTranscription: JSON.stringify({
+                            audioFileId: fileId,
+                            audioPath: path,
+                            patientId,
+                        }),
+                    });
+                }
+                
+                toast.warning("Connection lost. Audio saved locally. Transcription will resume when online.");
+                setState("idle");
+                setProgress(0);
+                return;
+            }
 
             setProgress(80);
 
-            // Transcribe
-            setState("transcribing");
-            const transcribeResponse = await fetch("/api/ai/transcribe", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ audioPath }),
-            });
+            // Transcribe (if we have audioPath)
+            try {
+                setState("transcribing");
+                const transcribeResponse = await fetch("/api/ai/transcribe", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ audioPath }),
+                });
 
-            if (!transcribeResponse.ok) {
-                const error = await transcribeResponse.json();
-                throw new Error(error.error || "Transcription failed");
-            }
+                if (!transcribeResponse.ok) {
+                    // Transcription failed, queue for retry
+                    const { saveDraft } = await import("@/app/_lib/offline/draft");
+                    const { getOfflineDB } = await import("@/app/_lib/offline/db");
+                    
+                    const db = getOfflineDB();
+                    const draft = await db.draftVisits
+                        .where("patientId")
+                        .equals(patientId)
+                        .first();
+                    
+                    if (draft) {
+                        await db.draftVisits.update(draft.draftId, {
+                            pendingTranscription: JSON.stringify({
+                                audioFileId: fileId,
+                                audioPath,
+                                patientId,
+                            }),
+                        });
+                    }
+                    
+                    throw new Error("Transcription failed, will retry when connection is restored");
+                }
 
-            const { text: newTranscript, rawText } = await transcribeResponse.json();
-            if (!newTranscript) {
-                throw new Error("Transcription returned empty result");
-            }
-            setTranscript(newTranscript);
-            onTranscriptReady(newTranscript);
-            setProgress(90);
+                const { text: newTranscript, rawText } = await transcribeResponse.json();
+                if (!newTranscript) {
+                    throw new Error("Transcription returned empty result");
+                }
+                setTranscript(newTranscript);
+                onTranscriptReady(newTranscript);
+                setProgress(90);
 
-            // Parse with previous transcripts as context
-            setState("parsing");
-            const parseResponse = await fetch("/api/ai/parse-visit", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    transcript: newTranscript,
-                    previousTranscripts: previousTranscripts.length > 0 ? previousTranscripts : undefined,
-                }),
-            });
+                // Parse with previous transcripts as context
+                try {
+                    setState("parsing");
+                    const parseResponse = await fetch("/api/ai/parse-visit", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            transcript: newTranscript,
+                            previousTranscripts: previousTranscripts.length > 0 ? previousTranscripts : undefined,
+                        }),
+                    });
 
-            if (!parseResponse.ok) {
-                const error = await parseResponse.json();
-                throw new Error(error.error || "Parsing failed");
-            }
+                    if (!parseResponse.ok) {
+                        // Parsing failed, queue for retry
+                        const { saveDraft } = await import("@/app/_lib/offline/draft");
+                        const { getOfflineDB } = await import("@/app/_lib/offline/db");
+                        
+                        const db = getOfflineDB();
+                        const draft = await db.draftVisits
+                            .where("patientId")
+                            .equals(patientId)
+                            .first();
+                        
+                        if (draft) {
+                            await db.draftVisits.update(draft.draftId, {
+                                pendingParsing: JSON.stringify({
+                                    transcript: newTranscript,
+                                    previousTranscripts: previousTranscripts.length > 0 ? previousTranscripts : undefined,
+                                    patientId,
+                                }),
+                            });
+                        }
+                        
+                        throw new Error("Parsing failed, will retry when connection is restored");
+                    }
 
-            const { parsed } = await parseResponse.json();
-            onParseReady(parsed);
+                    const { parsed } = await parseResponse.json();
+                    onParseReady(parsed);
 
-            // Add new transcript to previous transcripts for next recording
-            setPreviousTranscripts((prev) => [...prev, newTranscript]);
+                    // Add new transcript to previous transcripts for next recording
+                    setPreviousTranscripts((prev) => [...prev, newTranscript]);
 
-            setProgress(100);
-            setState("complete");
+                    setProgress(100);
+                    setState("complete");
 
-            toast.success("Audio processed successfully");
+                    toast.success("Audio processed successfully");
 
-            // Reset state after a short delay to allow recording again
-            setTimeout(() => {
+                    // Reset state after a short delay to allow recording again
+                    setTimeout(() => {
+                        setState("idle");
+                        setProgress(0);
+                    }, 2000);
+                } catch (parseError) {
+                    console.error("Error parsing transcript:", parseError);
+                    toast.warning("Parsing failed. Will retry when connection is restored.");
+                    setState("idle");
+                    setProgress(0);
+                }
+            } catch (transcribeError) {
+                console.error("Error transcribing audio:", transcribeError);
+                toast.warning("Transcription failed. Will retry when connection is restored.");
                 setState("idle");
                 setProgress(0);
-            }, 2000);
+            }
         } catch (error) {
             console.error("Error processing audio:", error);
-            toast.error(error instanceof Error ? error.message : "Processing failed");
+            const errorMessage = error instanceof Error ? error.message : "Processing failed";
+            
+            // If it's a network error, we've already saved locally
+            if (errorMessage.includes("retry") || errorMessage.includes("offline")) {
+                toast.warning(errorMessage);
+            } else {
+                toast.error(errorMessage);
+            }
+            
             setState("idle");
             setProgress(0);
         }

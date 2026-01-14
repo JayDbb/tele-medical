@@ -51,15 +51,15 @@ export function SignInForm() {
       if (data.user) {
         // Get user role from user metadata
         const role = (data.user.user_metadata?.role as string) || "patient";
-        
+
         // Redirect based on role
-        let redirectPath = "/dashboard"; // Default fallback
+        let redirectPath = "/"; // Default fallback
         if (role === "doctor") {
           redirectPath = "/waiting-room";
         } else if (role === "nurse") {
           redirectPath = "/patients";
         }
-        
+
         router.push(redirectPath);
         router.refresh();
       }

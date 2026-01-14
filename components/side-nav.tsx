@@ -118,6 +118,11 @@ export function SideNav({ userRole, userName, patientId, patientName, onMobileSt
                 label: "Patients",
                 icon: <Users className="h-4 w-4" />,
             });
+            items.push({
+                href: "/waiting-room",
+                label: "Waiting Room",
+                icon: <Clock className="h-4 w-4" />,
+            });
         }
 
         // Both doctors and nurses can create patients

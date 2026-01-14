@@ -22,7 +22,29 @@ export const visitNoteSchema = z.object({
       weight: z.string().default(""),
       height: z.string().default(""),
       bmi: z.string().default(""),
-      examFindings: z.string().default(""),
+      examFindings: z
+        .object({
+          general: z.string().default(""),
+          heent: z.string().default(""),
+          neck: z.string().default(""),
+          cardiovascular: z.string().default(""),
+          lungs: z.string().default(""),
+          abdomen: z.string().default(""),
+          musculoskeletal: z.string().default(""),
+          neurologic: z.string().default(""),
+          skin: z.string().default(""),
+        })
+        .default({
+          general: "",
+          heent: "",
+          neck: "",
+          cardiovascular: "",
+          lungs: "",
+          abdomen: "",
+          musculoskeletal: "",
+          neurologic: "",
+          skin: "",
+        }),
       visionOd: z.string().default(""),
       visionOs: z.string().default(""),
       visionOu: z.string().default(""),
@@ -39,7 +61,17 @@ export const visitNoteSchema = z.object({
       weight: "",
       height: "",
       bmi: "",
-      examFindings: "",
+      examFindings: {
+        general: "",
+        heent: "",
+        neck: "",
+        cardiovascular: "",
+        lungs: "",
+        abdomen: "",
+        musculoskeletal: "",
+        neurologic: "",
+        skin: "",
+      },
       visionOd: "",
       visionOs: "",
       visionOu: "",
@@ -50,31 +82,63 @@ export const visitNoteSchema = z.object({
       visionLastExamDate: "",
     }),
 
-  // Diabetes
-  diabetes: z
+  // Point of Care
+  pointOfCare: z
     .object({
-      fastingGlucose: z.string().default(""),
-      randomGlucose: z.string().default(""),
-      hbA1cValue: z.string().default(""),
-      hbA1cDate: z.string().default(""),
-      homeMonitoring: z.string().default(""),
-      averageReadings: z.string().default(""),
-      hypoglycemiaEpisodes: z.string().default(""),
-      hyperglycemiaSymptoms: z.string().default(""),
-      footExam: z.string().default(""),
-      eyeExamDue: z.string().default(""),
+      diabetes: z
+        .object({
+          fastingGlucose: z.string().default(""),
+          randomGlucose: z.string().default(""),
+          hbA1cValue: z.string().default(""),
+          hbA1cDate: z.string().default(""),
+          homeMonitoring: z.string().default(""),
+          averageReadings: z.string().default(""),
+          hypoglycemiaEpisodes: z.string().default(""),
+          hyperglycemiaSymptoms: z.string().default(""),
+          footExam: z.string().default(""),
+          eyeExamDue: z.string().default(""),
+        })
+        .default({
+          fastingGlucose: "",
+          randomGlucose: "",
+          hbA1cValue: "",
+          hbA1cDate: "",
+          homeMonitoring: "",
+          averageReadings: "",
+          hypoglycemiaEpisodes: "",
+          hyperglycemiaSymptoms: "",
+          footExam: "",
+          eyeExamDue: "",
+        }),
+      hiv: z.string().default("Unknown"), // "negative", "positive", or "Unknown"
+      syphilis: z
+        .object({
+          result: z.string().default("Unknown"), // "positive", "negative", or "Unknown"
+          reactivity: z.string().default("Unknown"), // "reactive", "non-reactive", or "Unknown"
+        })
+        .default({
+          result: "Unknown",
+          reactivity: "Unknown",
+        }),
     })
     .default({
-      fastingGlucose: "",
-      randomGlucose: "",
-      hbA1cValue: "",
-      hbA1cDate: "",
-      homeMonitoring: "",
-      averageReadings: "",
-      hypoglycemiaEpisodes: "",
-      hyperglycemiaSymptoms: "",
-      footExam: "",
-      eyeExamDue: "",
+      diabetes: {
+        fastingGlucose: "",
+        randomGlucose: "",
+        hbA1cValue: "",
+        hbA1cDate: "",
+        homeMonitoring: "",
+        averageReadings: "",
+        hypoglycemiaEpisodes: "",
+        hyperglycemiaSymptoms: "",
+        footExam: "",
+        eyeExamDue: "",
+      },
+      hiv: "Unknown",
+      syphilis: {
+        result: "Unknown",
+        reactivity: "Unknown",
+      },
     }),
 
   // Medications (array of medication records) - matches patient medications structure
@@ -83,7 +147,6 @@ export const visitNoteSchema = z.object({
       z.object({
         id: z.string().optional(), // Optional for new medications, required when syncing to patient
         brandName: z.string().optional().default(""),
-        genericName: z.string().optional().default(""),
         strength: z.string().optional().default(""),
         form: z.string().optional().default(""),
         dosage: z.string().optional().default(""),
@@ -91,19 +154,46 @@ export const visitNoteSchema = z.object({
         status: z
           .enum(["Active", "Inactive", "Discontinued"])
           .default("Active"),
-        notes: z.string().optional().default(""),
+        notes: z.string().optional().default(""), // Can include linked diagnosis
         createdAt: z.string().optional(),
       })
     )
     .default([]),
 
-  // Assessment & Plan
+  // Assessment & Plan - array of detailed assessment-plan entries
   assessmentPlan: z
-    .object({
-      assessment: z.string().default(""),
-      plan: z.string().default(""),
-    })
-    .default({ assessment: "", plan: "" }),
+    .array(
+      z.object({
+        assessment: z.string().default(""), // Diagnosis/assessment with ICD-10 (e.g., "Acute Otitis Media – New (H66.90)")
+        plan: z.string().default(""),       // Treatment plan summary
+        medications: z
+          .array(
+            z.object({
+              brandName: z.string().default(""),
+              strength: z.string().default(""),
+              form: z.string().default(""),
+              dosage: z.string().default(""),
+              frequency: z.string().default(""),
+            })
+          )
+          .default([]), // Medications linked to this diagnosis
+        orders: z
+          .array(
+            z.object({
+              type: z.string().default(""),
+              priority: z.string().default(""),
+              details: z.string().default(""),
+              status: z.string().default(""),
+              dateOrdered: z.string().default(""),
+            })
+          )
+          .default([]), // Orders linked to this diagnosis
+        followUp: z.string().default(""), // Follow-up instructions
+        education: z.string().default(""), // Patient education provided
+        coordination: z.string().default(""), // Care coordination notes
+      })
+    )
+    .default([]),
 
   // Vaccines (array of vaccine records)
   vaccines: z
@@ -226,9 +316,109 @@ export function createEmptyVisitNote(): VisitNote {
 }
 
 /**
+ * Migrate old format data to new format
+ * Handles backward compatibility for examFindings (string -> object)
+ */
+function migrateVisitNoteData(data: any): any {
+  if (!data || typeof data !== "object") {
+    return data;
+  }
+
+  const migrated = { ...data };
+
+  // Ensure objective exists
+  if (!migrated.objective) {
+    migrated.objective = {};
+  }
+
+  // Migrate examFindings from string to object format
+  if (typeof migrated.objective === "object") {
+    const examFindings = migrated.objective.examFindings;
+    
+    if (typeof examFindings === "string") {
+      // Convert old string format to new object format
+      // Put the old string in the "general" category
+      migrated.objective = {
+        ...migrated.objective,
+        examFindings: {
+          general: examFindings || "",
+          heent: "",
+          neck: "",
+          cardiovascular: "",
+          lungs: "",
+          abdomen: "",
+          musculoskeletal: "",
+          neurologic: "",
+          skin: "",
+        },
+      };
+    } else if (
+      !examFindings ||
+      typeof examFindings !== "object" ||
+      examFindings.general === undefined
+    ) {
+      // Ensure examFindings exists and has the correct structure
+      migrated.objective = {
+        ...migrated.objective,
+        examFindings: {
+          general: examFindings?.general || "",
+          heent: examFindings?.heent || "",
+          neck: examFindings?.neck || "",
+          cardiovascular: examFindings?.cardiovascular || "",
+          lungs: examFindings?.lungs || "",
+          abdomen: examFindings?.abdomen || "",
+          musculoskeletal: examFindings?.musculoskeletal || "",
+          neurologic: examFindings?.neurologic || "",
+          skin: examFindings?.skin || "",
+        },
+      };
+    }
+  }
+
+  // Migrate assessmentPlan from old format (object) to new format (array)
+  if (migrated.assessmentPlan) {
+    if (typeof migrated.assessmentPlan === "object" && !Array.isArray(migrated.assessmentPlan)) {
+      // Old format: object with assessment/plan
+      if ("assessment" in migrated.assessmentPlan || "plan" in migrated.assessmentPlan) {
+        const old = migrated.assessmentPlan as { assessment?: string; plan?: string };
+        if (old.assessment || old.plan) {
+          migrated.assessmentPlan = [{ 
+            assessment: old.assessment || "", 
+            plan: old.plan || "",
+            medications: [],
+            orders: [],
+            followUp: "",
+            education: "",
+            coordination: "",
+          }];
+        } else {
+          migrated.assessmentPlan = [];
+        }
+      }
+    } else if (Array.isArray(migrated.assessmentPlan)) {
+      // Ensure all entries have the new structure
+      migrated.assessmentPlan = migrated.assessmentPlan.map((entry: any) => ({
+        assessment: entry.assessment || "",
+        plan: entry.plan || "",
+        medications: entry.medications || [],
+        orders: entry.orders || [],
+        followUp: entry.followUp || "",
+        education: entry.education || "",
+        coordination: entry.coordination || "",
+      }));
+    }
+  } else {
+    migrated.assessmentPlan = [];
+  }
+
+  return migrated;
+}
+
+/**
  * Validate and parse a visit note (from AI or user input)
  * Returns the parsed note or throws if invalid
  */
 export function parseVisitNote(data: unknown): VisitNote {
-  return visitNoteSchema.parse(data);
+  const migrated = migrateVisitNoteData(data);
+  return visitNoteSchema.parse(migrated);
 }

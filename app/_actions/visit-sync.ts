@@ -241,25 +241,16 @@ async function syncMedications(
       strength?: string;
     }
   ): boolean => {
-    const name1 = (med1.brandName || med1.genericName || "")
+    const name1 = (med1.brandName || "")
       .toLowerCase()
       .trim();
-    const name2 = (med2.brandName || med2.genericName || "")
+    const name2 = (med2.brandName || "")
       .toLowerCase()
       .trim();
 
     if (!name1 || !name2) return false;
 
-    const namesMatch =
-      name1 === name2 ||
-      (med1.brandName &&
-        med2.brandName &&
-        med1.brandName.toLowerCase().trim() ===
-          med2.brandName.toLowerCase().trim()) ||
-      (med1.genericName &&
-        med2.genericName &&
-        med1.genericName.toLowerCase().trim() ===
-          med2.genericName.toLowerCase().trim());
+    const namesMatch = name1 === name2;
 
     if (!namesMatch) return false;
 
@@ -278,7 +269,7 @@ async function syncMedications(
   let updated = 0;
 
   for (const visitMed of visitMedications) {
-    if (!visitMed.brandName?.trim() && !visitMed.genericName?.trim()) {
+    if (!visitMed.brandName?.trim()) {
       continue;
     }
 
@@ -291,8 +282,7 @@ async function syncMedications(
         ...updatedMedications[existingIndex],
         brandName:
           visitMed.brandName || updatedMedications[existingIndex].brandName,
-        genericName:
-          visitMed.genericName || updatedMedications[existingIndex].genericName,
+        genericName: updatedMedications[existingIndex].genericName, // Preserve existing genericName if present
         strength:
           visitMed.strength || updatedMedications[existingIndex].strength,
         form: visitMed.form || updatedMedications[existingIndex].form,
@@ -307,7 +297,7 @@ async function syncMedications(
       const newMedication: Medication = {
         id: visitMed.id || uuidv4(),
         brandName: visitMed.brandName,
-        genericName: visitMed.genericName,
+        genericName: undefined, // Not used in visit notes anymore
         strength: visitMed.strength,
         form: visitMed.form,
         dosage: visitMed.dosage,

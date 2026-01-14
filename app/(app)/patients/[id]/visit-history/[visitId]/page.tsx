@@ -21,7 +21,7 @@ export default async function VisitDetailPage({
 
   // Allow doctors and nurses
   if (session.role !== "doctor" && session.role !== "nurse") {
-    redirect("/dashboard");
+    redirect("/");
   }
 
   // Get visit details

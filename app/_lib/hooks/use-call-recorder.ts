@@ -192,7 +192,7 @@ export function useCallRecorder({
     }
   }, [room]);
 
-  // Upload chunk to server
+  // Upload chunk to server with offline fallback
   const uploadChunk = useCallback(
     async (
       chunk: Blob,
@@ -200,25 +200,129 @@ export function useCallRecorder({
       sessionId: string,
       mimeType: string
     ) => {
-      const formData = new FormData();
-      formData.append("chunk", chunk);
-      formData.append("chunkIndex", chunkIndex.toString());
-      formData.append("recordingSessionId", sessionId);
-      formData.append("mimeType", mimeType);
-
-      const response = await fetch(`/api/visits/${visitId}/recording/chunk`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response
-          .json()
-          .catch(() => ({ error: "Upload failed" }));
-        throw new Error(error.error || "Failed to upload chunk");
+      const isOnline = navigator.onLine;
+      
+      // If offline, store chunk locally and queue for later
+      if (!isOnline) {
+        const { storeFile } = await import("@/app/_lib/offline/files");
+        const { saveDraft } = await import("@/app/_lib/offline/draft");
+        const { getOfflineDB } = await import("@/app/_lib/offline/db");
+        
+        // Store chunk as file
+        const chunkFile = new File([chunk], `chunk-${chunkIndex}-${sessionId}`, {
+          type: mimeType,
+        });
+        const fileId = await storeFile(chunkFile);
+        
+        // Save chunk info to draft for retry
+        const db = getOfflineDB();
+        const draft = await db.draftVisits
+          .where("visitIdRemote")
+          .equals(visitId)
+          .first();
+        
+        if (draft) {
+          const pendingChunks = JSON.parse(draft.pendingChunks || "[]") as string[];
+          pendingChunks.push(JSON.stringify({
+            fileId,
+            chunkIndex,
+            sessionId,
+            mimeType,
+            visitId,
+          }));
+          await db.draftVisits.update(draft.draftId, {
+            pendingChunks: JSON.stringify(pendingChunks),
+            recordingSessionId: sessionId,
+          });
+        }
+        
+        throw new Error("Offline: Chunk saved locally, will retry when online");
       }
 
-      return response.json();
+      try {
+        const formData = new FormData();
+        formData.append("chunk", chunk);
+        formData.append("chunkIndex", chunkIndex.toString());
+        formData.append("recordingSessionId", sessionId);
+        formData.append("mimeType", mimeType);
+
+        const response = await fetch(`/api/visits/${visitId}/recording/chunk`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          // If upload fails, store locally and queue for retry
+          const { storeFile } = await import("@/app/_lib/offline/files");
+          const { getOfflineDB } = await import("@/app/_lib/offline/db");
+          
+          const chunkFile = new File([chunk], `chunk-${chunkIndex}-${sessionId}`, {
+            type: mimeType,
+          });
+          const fileId = await storeFile(chunkFile);
+          
+          const db = getOfflineDB();
+          const draft = await db.draftVisits
+            .where("visitIdRemote")
+            .equals(visitId)
+            .first();
+          
+          if (draft) {
+            const pendingChunks = JSON.parse(draft.pendingChunks || "[]") as string[];
+            pendingChunks.push(JSON.stringify({
+              fileId,
+              chunkIndex,
+              sessionId,
+              mimeType,
+              visitId,
+            }));
+            await db.draftVisits.update(draft.draftId, {
+              pendingChunks: JSON.stringify(pendingChunks),
+              recordingSessionId: sessionId,
+            });
+          }
+          
+          const error = await response
+            .json()
+            .catch(() => ({ error: "Upload failed" }));
+          throw new Error(error.error || "Failed to upload chunk");
+        }
+
+        return response.json();
+      } catch (error) {
+        // Network error - store locally
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          const { storeFile } = await import("@/app/_lib/offline/files");
+          const { getOfflineDB } = await import("@/app/_lib/offline/db");
+          
+          const chunkFile = new File([chunk], `chunk-${chunkIndex}-${sessionId}`, {
+            type: mimeType,
+          });
+          const fileId = await storeFile(chunkFile);
+          
+          const db = getOfflineDB();
+          const draft = await db.draftVisits
+            .where("visitIdRemote")
+            .equals(visitId)
+            .first();
+          
+          if (draft) {
+            const pendingChunks = JSON.parse(draft.pendingChunks || "[]") as string[];
+            pendingChunks.push(JSON.stringify({
+              fileId,
+              chunkIndex,
+              sessionId,
+              mimeType,
+              visitId,
+            }));
+            await db.draftVisits.update(draft.draftId, {
+              pendingChunks: JSON.stringify(pendingChunks),
+              recordingSessionId: sessionId,
+            });
+          }
+        }
+        throw error;
+      }
     },
     [visitId]
   );
@@ -531,22 +635,108 @@ export function useCallRecorder({
               isTranscribing: true,
             }));
 
-            const response = await fetch(
-              `/api/visits/${visitId}/recording/finalize`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  recordingSessionId: recordingSessionIdRef.current,
-                }),
+            // Check if online before finalizing
+            if (!navigator.onLine) {
+              // Save draft with pending finalization
+              const { saveDraft } = await import("@/app/_lib/offline/draft");
+              const { getOfflineDB } = await import("@/app/_lib/offline/db");
+              
+              const db = getOfflineDB();
+              const draft = await db.draftVisits
+                .where("visitIdRemote")
+                .equals(visitId)
+                .first();
+              
+              if (draft) {
+                await db.draftVisits.update(draft.draftId, {
+                  recordingSessionId: recordingSessionIdRef.current ? recordingSessionIdRef.current : undefined,
+                });
               }
-            );
+              
+              toast.warning("Connection lost. Recording saved. Finalization will resume when online.");
+              setState({
+                isRecording: false,
+                isUploading: false,
+                isTranscribing: false,
+                isParsing: false,
+                isFinalizing: false,
+                recordingSessionId: null,
+                statusMessage: null,
+              });
+              isStoppingRef.current = false;
+              resolve();
+              return;
+            }
+
+            let response: Response;
+            try {
+              response = await fetch(
+                `/api/visits/${visitId}/recording/finalize`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    recordingSessionId: recordingSessionIdRef.current || undefined,
+                  }),
+                }
+              );
+            } catch (networkError) {
+              // Network error - save for retry
+              const { saveDraft } = await import("@/app/_lib/offline/draft");
+              const { getOfflineDB } = await import("@/app/_lib/offline/db");
+              
+              const db = getOfflineDB();
+              const draft = await db.draftVisits
+                .where("visitIdRemote")
+                .equals(visitId)
+                .first();
+              
+              if (draft) {
+                await db.draftVisits.update(draft.draftId, {
+                  recordingSessionId: recordingSessionIdRef.current ? recordingSessionIdRef.current : undefined,
+                });
+              }
+              
+              toast.warning("Connection lost. Recording saved. Finalization will resume when online.");
+              setState({
+                isRecording: false,
+                isUploading: false,
+                isTranscribing: false,
+                isParsing: false,
+                isFinalizing: false,
+                recordingSessionId: null,
+                statusMessage: null,
+              });
+              isStoppingRef.current = false;
+              resolve();
+              return;
+            }
 
             if (!response.ok) {
+              // If finalization fails, check if it's due to missing chunks (will retry later)
               const error = await response
                 .json()
                 .catch(() => ({ error: "Finalize failed" }));
-              throw new Error(error.error || "Failed to finalize recording");
+              
+              // If chunks are missing, they'll be retried by sync engine
+              if (error.error?.includes("chunk") || error.error?.includes("No chunks")) {
+                toast.warning("Some chunks are still uploading. Finalization will retry automatically.");
+              } else {
+                throw new Error(error.error || "Failed to finalize recording");
+              }
+              
+              setState({
+                isRecording: false,
+                isUploading: false,
+                isTranscribing: false,
+                isParsing: false,
+                isFinalizing: false,
+                recordingSessionId: null,
+                statusMessage: null,
+              });
+              isStoppingRef.current = false;
+              resolve();
+              return;
             }
 
             const data = await response.json();

@@ -38,7 +38,7 @@ export default async function VisitHistoryPage({
 
   // Allow doctors and nurses
   if (session.role !== "doctor" && session.role !== "nurse") {
-    redirect("/dashboard");
+    redirect("/");
   }
 
   // Parse query params

@@ -18,6 +18,23 @@ export class OfflineDB extends Dexie {
       outbox: "id, createdAt, status, [status+createdAt], dependsOn",
       files: "id, createdAt",
     });
+
+    // Version 2: Add pending operations tracking
+    this.version(2)
+      .stores({
+        draftVisits: "draftId, patientId, userId, [userId+patientId], updatedAt",
+        outbox: "id, createdAt, status, [status+createdAt], dependsOn",
+        files: "id, createdAt",
+      })
+      .upgrade((tx) => {
+        // Migration: add new fields to existing drafts
+        return tx.table("draftVisits").toCollection().modify((draft) => {
+          if (!draft.pendingChunks) draft.pendingChunks = undefined;
+          if (!draft.pendingTranscription) draft.pendingTranscription = undefined;
+          if (!draft.pendingParsing) draft.pendingParsing = undefined;
+          if (!draft.recordingSessionId) draft.recordingSessionId = undefined;
+        });
+      });
   }
 }
 
@@ -35,6 +52,10 @@ export interface DraftVisit {
   audioFileId?: string; // Reference to files table
   transcript?: string;
   audioPath?: string;
+  pendingChunks?: string; // JSON array of chunk file IDs that failed to upload
+  pendingTranscription?: string; // JSON: { audioFileId, audioPath, visitId }
+  pendingParsing?: string; // JSON: { transcript, visitId, previousTranscripts? }
+  recordingSessionId?: string; // For tracking recording sessions
 }
 
 export interface OutboxOperation {

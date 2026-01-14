@@ -2,6 +2,35 @@
 
 import { queueFileUpload, queueMutation } from "@/app/_lib/offline/outbox";
 
+// Pre-load lamejs module when online to avoid chunk load errors when offline
+let lamejsModule: any = null;
+let lamejsLoadPromise: Promise<any> | null = null;
+
+/**
+ * Pre-load the lamejs library when online
+ */
+export async function preloadLamejs(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (lamejsModule) return; // Already loaded
+  if (lamejsLoadPromise) return lamejsLoadPromise; // Already loading
+
+  if (!navigator.onLine) {
+    throw new Error("Cannot preload lamejs: offline");
+  }
+
+  lamejsLoadPromise = import("@breezystack/lamejs")
+    .then((module) => {
+      lamejsModule = module;
+      return module;
+    })
+    .catch((error) => {
+      lamejsLoadPromise = null; // Reset on error so we can retry
+      throw error;
+    });
+
+  return lamejsLoadPromise;
+}
+
 /**
  * Internal conversion function - does the actual MP3 conversion
  * Exported for use in offline sync
@@ -12,9 +41,32 @@ export async function _convertToMP3Internal(audioBlob: Blob): Promise<Blob> {
     throw new Error("convertToMP3 can only be used in browser environment");
   }
 
-  // Dynamically import lamejs only on client side to avoid SSR issues
-  // The library exports Mp3Encoder directly
-  const { Mp3Encoder } = await import("@breezystack/lamejs");
+  // Try to get lamejs module (pre-loaded or load now)
+  let Mp3Encoder: any;
+  try {
+    if (lamejsModule) {
+      Mp3Encoder = lamejsModule.Mp3Encoder;
+    } else if (navigator.onLine) {
+      // Try to load if online
+      const module = await import("@breezystack/lamejs");
+      lamejsModule = module;
+      Mp3Encoder = module.Mp3Encoder;
+    } else {
+      // Offline and not pre-loaded - throw error that can be caught
+      throw new Error("lamejs library not available offline. Audio will be stored in original format.");
+    }
+  } catch (error: any) {
+    // Check if it's a chunk load error or network error
+    if (
+      error?.message?.includes("chunk") ||
+      error?.message?.includes("Failed to load") ||
+      error?.message?.includes("network") ||
+      !navigator.onLine
+    ) {
+      throw new Error("MP3 conversion unavailable offline. Audio will be stored in original format.");
+    }
+    throw error;
+  }
 
   // Create an audio context to decode the audio
   const audioContext = new AudioContext();

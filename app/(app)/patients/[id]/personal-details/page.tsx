@@ -19,7 +19,7 @@ export default async function PersonalDetailsPage({
 
     // Allow doctors and nurses
     if (session.role !== "doctor" && session.role !== "nurse") {
-        redirect("/dashboard");
+        redirect("/");
     }
 
     // Fetch patient personal details

@@ -28,11 +28,12 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { SectionStepper, visitSections } from "./section-stepper";
+import { SectionStepper, visitSections, getSectionsForRole } from "./section-stepper";
 import { AICapturePanel } from "./ai-capture-panel";
 import { OfflineSyncBadge } from "./offline-sync-badge";
 import { MedicalInfoPanel } from "./medical-info-panel";
-import { visitNoteSchema, type VisitNote, createEmptyVisitNote } from "@/app/_lib/visit-note/schema";
+import { visitNoteSchema, type VisitNote, createEmptyVisitNote, parseVisitNote } from "@/app/_lib/visit-note/schema";
+import { preloadLamejs } from "@/app/_lib/utils/audioConverter";
 import type { z } from "zod";
 import { mergeVisitNote } from "@/app/_lib/visit-note/merge-with-conflicts";
 import { loadDraft, saveDraft, getReviewedSections, clearDraft } from "@/app/_lib/offline/draft";
@@ -55,6 +56,7 @@ interface NewVisitFormProps {
   initialParsedData?: any;
   onParseReadyRef?: React.MutableRefObject<((parsed: any) => void) | null>;
   onSaveReadyRef?: React.MutableRefObject<(() => Promise<void>) | null>;
+  isInVideoCall?: boolean; // Flag to indicate if form is in video call context
 }
 
 
@@ -72,13 +74,22 @@ export function NewVisitForm({
   initialParsedData,
   onParseReadyRef,
   onSaveReadyRef,
+  isInVideoCall = false,
 }: NewVisitFormProps) {
   const router = useRouter();
-  const [currentSection, setCurrentSection] = React.useState(visitSections[0].id);
+  // Get sections based on role
+  const roleSections = React.useMemo(() => getSectionsForRole(userRole), [userRole]);
+  const [currentSection, setCurrentSection] = React.useState(roleSections[0].id);
   const [reviewedSections, setReviewedSections] = React.useState<Set<string>>(new Set());
   const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set());
   const [medicalPanelOpen, setMedicalPanelOpen] = React.useState(false);
   const [medicalPanelSection, setMedicalPanelSection] = React.useState<string | null>(null);
+  const [isOnline, setIsOnline] = React.useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = React.useState(0);
+  const [isSyncing, setIsSyncing] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [visitIdRemote, setVisitIdRemote] = React.useState<string | null>(existingVisitId || null);
+  const [draftLoaded, setDraftLoaded] = React.useState(false);
 
   // Listen for medical panel open events from PatientChartShell
   React.useEffect(() => {
@@ -121,8 +132,33 @@ export function NewVisitForm({
     }
   }, []);
 
+  const [showPostSaveModal, setShowPostSaveModal] = React.useState(false);
+  const [isProcessingAction, setIsProcessingAction] = React.useState(false);
+  const appliedParsedDataRef = React.useRef<any>(null);
+
+  const form = useForm({
+    resolver: zodResolver(visitNoteSchema),
+    defaultValues: createEmptyVisitNote(),
+  });
+
   // Auto-mark section as reviewed when navigated to
-  const handleSectionChange = React.useCallback((sectionId: string) => {
+  const handleSectionChange = React.useCallback(async (sectionId: string) => {
+    // Save current section data before switching
+    if (draftLoaded) {
+      try {
+        const formData = form.getValues() as VisitNote;
+        await saveDraft(patientId, userId, {
+          formState: formData,
+          reviewedSections: reviewedSections,
+          expandedSections: expandedSections,
+          role: userRole,
+          visitIdRemote: visitIdRemote || undefined,
+        });
+      } catch (error) {
+        console.error("Error auto-saving on section change:", error);
+      }
+    }
+
     // Regular section navigation (Visit Note Sections)
     setCurrentSection(sectionId);
     setReviewedSections((prev) => {
@@ -133,21 +169,8 @@ export function NewVisitForm({
     // Close medical panel if open when navigating visit note sections
     setMedicalPanelOpen(false);
     setMedicalPanelSection(null);
-  }, []);
-  const [isOnline, setIsOnline] = React.useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = React.useState(0);
-  const [isSyncing, setIsSyncing] = React.useState(false);
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [visitIdRemote, setVisitIdRemote] = React.useState<string | null>(existingVisitId || null);
-  const [draftLoaded, setDraftLoaded] = React.useState(false);
-  const [showPostSaveModal, setShowPostSaveModal] = React.useState(false);
-  const [isProcessingAction, setIsProcessingAction] = React.useState(false);
-  const appliedParsedDataRef = React.useRef<any>(null);
-
-  const form = useForm({
-    resolver: zodResolver(visitNoteSchema),
-    defaultValues: createEmptyVisitNote(),
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftLoaded, patientId, userId, userRole, reviewedSections, expandedSections, visitIdRemote]);
 
   // Watch weight and height for BMI calculation
   const weight = useWatch({ control: form.control, name: "objective.weight" });
@@ -178,18 +201,86 @@ export function NewVisitForm({
     calculateBMI();
   }, [weight, height, form]);
 
+  // Pre-load lamejs when component mounts (if online)
+  React.useEffect(() => {
+    if (navigator.onLine) {
+      preloadLamejs().catch((error) => {
+        console.warn("Failed to preload lamejs:", error);
+      });
+    }
+  }, []);
+
+  // Listen for draft updates from sync engine
+  React.useEffect(() => {
+    const handleDraftUpdate = async (event: Event) => {
+      const customEvent = event as CustomEvent<{ patientId?: string; hasParsedData?: boolean }>;
+      const { patientId: updatedPatientId, hasParsedData } = customEvent.detail || {};
+
+      // Only reload if this draft is for the current patient
+      if (updatedPatientId === patientId && draftLoaded) {
+        try {
+          const { getDraftFormState } = await import("@/app/_lib/offline/draft");
+          const updatedFormState = await getDraftFormState(patientId, userId);
+
+          if (updatedFormState) {
+            const currentData = form.getValues() as VisitNote;
+            // Merge with most recent (AI) values taking precedence
+            const merged = mergeVisitNote(currentData, updatedFormState);
+            form.reset(merged);
+
+            if (hasParsedData) {
+              toast.success("Visit note updated with AI-parsed data");
+            } else {
+              toast.info("Draft updated");
+            }
+          }
+        } catch (error) {
+          console.error("Error reloading draft after sync:", error);
+        }
+      }
+    };
+
+    window.addEventListener("draftUpdated", handleDraftUpdate);
+
+    return () => {
+      window.removeEventListener("draftUpdated", handleDraftUpdate);
+    };
+  }, [patientId, userId, draftLoaded, form]);
+
   // Load draft on mount
   React.useEffect(() => {
     const loadDraftData = async () => {
       try {
-        // If editing existing visit, load from visit data first
+        // Always check for draft first (even when editing existing visit)
+        // This ensures unsaved changes persist across page refreshes
+        const draft = await loadDraft(patientId, userId, userRole);
+        const formState = await getDraftFormState(patientId, userId);
+        const reviewed = await getReviewedSections(patientId, userId);
+
+        // If we have a draft with meaningful form state, use it (user's unsaved changes)
+        // Check if draft has actual data (not just empty defaults)
+        const hasDraftData = formState && draft.formStateJson && draft.formStateJson !== "{}" && draft.formStateJson.trim() !== "";
+        if (hasDraftData) {
+          form.reset(formState);
+          setReviewedSections(reviewed);
+          if (draft.visitIdRemote) {
+            setVisitIdRemote(draft.visitIdRemote);
+          }
+          setDraftLoaded(true);
+          return;
+        }
+
+        // If editing existing visit and no draft, load from visit data
         if (existingVisitId && existingVisitData) {
           try {
-            const parsedData = visitNoteSchema.parse(existingVisitData);
+            // Use parseVisitNote which handles migration
+            const parsedData = parseVisitNote(existingVisitData);
             form.reset(parsedData);
-            // Mark all sections as reviewed when editing
-            setReviewedSections(new Set(visitSections.map(s => s.id)));
-            setExpandedSections(new Set(visitSections.map(s => s.id)));
+            // Reset reviewed sections - user must view each section to mark it as reviewed
+            setReviewedSections(new Set());
+            // Expand all sections for easier navigation when editing
+            const sectionsForRole = getSectionsForRole(userRole);
+            setExpandedSections(new Set(sectionsForRole.map(s => s.id)));
             setVisitIdRemote(existingVisitId);
             setDraftLoaded(true);
             return;
@@ -198,17 +289,11 @@ export function NewVisitForm({
           }
         }
 
-        // Otherwise, try loading draft
-        const draft = await loadDraft(patientId, userId, userRole);
-        const formState = await getDraftFormState(patientId, userId);
-        const reviewed = await getReviewedSections(patientId, userId);
-
-        if (formState) {
-          form.reset(formState);
-        }
-        // Mark initial section as reviewed if not already
-        if (!reviewed.has(visitSections[0].id)) {
-          reviewed.add(visitSections[0].id);
+        // No draft and not editing - start fresh
+        // Mark initial section as reviewed (use role-specific sections)
+        const sectionsForRole = getSectionsForRole(userRole);
+        if (!reviewed.has(sectionsForRole[0].id)) {
+          reviewed.add(sectionsForRole[0].id);
         }
 
         setReviewedSections(reviewed);
@@ -292,10 +377,23 @@ export function NewVisitForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, userId, draftLoaded]);
 
-  // Online/offline detection
+  // Online/offline detection and sync engine
   React.useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      // Start sync engine when online
+      const { getSyncEngine } = require("@/app/_lib/offline/sync-engine");
+      const syncEngine = getSyncEngine();
+      syncEngine.start();
+    };
     const handleOffline = () => setIsOnline(false);
+
+    // Initialize sync engine
+    if (navigator.onLine) {
+      const { getSyncEngine } = require("@/app/_lib/offline/sync-engine");
+      const syncEngine = getSyncEngine();
+      syncEngine.start();
+    }
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
@@ -303,6 +401,10 @@ export function NewVisitForm({
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      // Stop sync engine on unmount
+      const { getSyncEngine } = require("@/app/_lib/offline/sync-engine");
+      const syncEngine = getSyncEngine();
+      syncEngine.stop();
     };
   }, []);
 
@@ -357,7 +459,8 @@ export function NewVisitForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewedSections.size, patientId, userId, userRole, draftLoaded]);
 
-  const allSectionsReviewed = visitSections.every((s) => reviewedSections.has(s.id));
+  // Check if all visible sections (based on role) are reviewed
+  const allSectionsReviewed = roleSections.every((s) => reviewedSections.has(s.id));
 
 
 
@@ -492,27 +595,27 @@ export function NewVisitForm({
     }
   };
 
-  const currentSectionIndex = visitSections.findIndex((s) => s.id === currentSection);
-  const canGoNext = currentSectionIndex < visitSections.length - 1;
+  const currentSectionIndex = roleSections.findIndex((s) => s.id === currentSection);
+  const canGoNext = currentSectionIndex < roleSections.length - 1;
   const canGoPrev = currentSectionIndex > 0;
 
   const goToNext = () => {
     if (canGoNext) {
-      const nextSectionId = visitSections[currentSectionIndex + 1].id;
+      const nextSectionId = roleSections[currentSectionIndex + 1].id;
       handleSectionChange(nextSectionId);
     }
   };
 
   const goToPrev = () => {
     if (canGoPrev) {
-      const prevSectionId = visitSections[currentSectionIndex - 1].id;
+      const prevSectionId = roleSections[currentSectionIndex - 1].id;
       handleSectionChange(prevSectionId);
     }
   };
 
   // Render form section based on currentSection
   const renderSection = () => {
-    const section = visitSections.find((s) => s.id === currentSection);
+    const section = roleSections.find((s) => s.id === currentSection);
     if (!section) return null;
 
     switch (section.id) {
@@ -557,7 +660,21 @@ export function NewVisitForm({
               <Label className="text-base">Temperature</Label>
               <Input
                 {...form.register("objective.temp")}
+                placeholder="e.g., 98.6"
               />
+              {form.watch("objective.temp") && (
+                <p className="text-xs text-muted-foreground">
+                  {(() => {
+                    const temp = form.watch("objective.temp") || "";
+                    const num = parseFloat(temp);
+                    if (!isNaN(num) && temp) {
+                      const celsius = ((num - 32) * 5) / 9;
+                      return `${temp}°F = ${celsius.toFixed(1)}°C`;
+                    }
+                    return "";
+                  })()}
+                </p>
+              )}
             </div>
             <div className="space-y-3">
               <Label className="text-base">Weight (lbs)</Label>
@@ -565,6 +682,19 @@ export function NewVisitForm({
                 {...form.register("objective.weight")}
                 placeholder="e.g., 170"
               />
+              {form.watch("objective.weight") && (
+                <p className="text-xs text-muted-foreground">
+                  {(() => {
+                    const weight = form.watch("objective.weight") || "";
+                    const num = parseFloat(weight);
+                    if (!isNaN(num) && weight) {
+                      const kg = num * 0.453592;
+                      return `${weight} lbs = ${kg.toFixed(1)} kg`;
+                    }
+                    return "";
+                  })()}
+                </p>
+              )}
             </div>
             <div className="space-y-3">
               <Label className="text-base">Height (cm)</Label>
@@ -572,6 +702,25 @@ export function NewVisitForm({
                 {...form.register("objective.height")}
                 placeholder="e.g., 177.8"
               />
+              {form.watch("objective.height") && (
+                <p className="text-xs text-muted-foreground">
+                  {(() => {
+                    const heightValue = form.watch("objective.height");
+                    if (!heightValue) return "";
+                    const num = parseFloat(heightValue);
+                    if (!isNaN(num)) {
+                      const inches = num / 2.54;
+                      const feet = Math.floor(inches / 12);
+                      const remainingInches = Math.round(inches % 12);
+                      if (feet > 0) {
+                        return `${heightValue} cm = ${feet}'${remainingInches}"`;
+                      }
+                      return `${heightValue} cm = ${inches.toFixed(1)} in`;
+                    }
+                    return "";
+                  })()}
+                </p>
+              )}
             </div>
             <div className="space-y-3">
               <Label className="text-base">BMI</Label>
@@ -582,13 +731,31 @@ export function NewVisitForm({
                 className="bg-muted cursor-not-allowed"
               />
             </div>
-            <div className="md:col-span-2 space-y-3">
-              <Label className="text-base">Exam Findings</Label>
-              <Textarea
-                {...form.register("objective.examFindings")}
-                rows={6}
-                className="min-h-[150px]"
-              />
+            <div className="md:col-span-2 space-y-4">
+              <Label className="text-base font-semibold">Physical Examination</Label>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[
+                  { key: "general", label: "General" },
+                  { key: "heent", label: "HEENT" },
+                  { key: "neck", label: "Neck" },
+                  { key: "cardiovascular", label: "Cardiovascular" },
+                  { key: "lungs", label: "Lungs" },
+                  { key: "abdomen", label: "Abdomen" },
+                  { key: "musculoskeletal", label: "Musculoskeletal" },
+                  { key: "neurologic", label: "Neurologic" },
+                  { key: "skin", label: "Skin" },
+                ].map((category) => (
+                  <div key={category.key} className="space-y-2">
+                    <Label className="text-sm font-medium">{category.label}</Label>
+                    <Textarea
+                      {...form.register(`objective.examFindings.${category.key}` as any)}
+                      rows={3}
+                      className="min-h-[80px] resize-none"
+                      placeholder={`${category.label} examination findings...`}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
             {/* Vision fields */}
             {["visionOd", "visionOs", "visionOu", "visionCorrection", "visionBlurry", "visionFloaters", "visionPain", "visionLastExamDate"].map((field) => (
@@ -602,104 +769,172 @@ export function NewVisitForm({
             ))}
           </div>
         );
-      case "diabetes":
+      case "pointOfCare":
         return (
-          <div className="grid gap-6 md:grid-cols-3">
-            {/* Row 1 */}
-            {["fastingGlucose", "randomGlucose"].map((field) => (
-              <div key={field} className="space-y-3">
-                <Label className="text-base">{field === "fastingGlucose" ? "Fasting Blood Glucose" : "Random Blood Glucose"}</Label>
-                <Input
-                  {...form.register(`diabetes.${field}` as any)}
-                  placeholder="mg/dL"
-                />
-              </div>
-            ))}
-            <div className="flex gap-3">
-              <div className="flex-1 space-y-3">
-                <Label className="text-base">HbA1c</Label>
-                <Input
-                  {...form.register("diabetes.hbA1cValue")}
-                  placeholder="e.g. 7.1%"
-                />
-              </div>
-              <div className="flex-1 space-y-3">
-                <Label className="text-base">Date</Label>
-                <Input
-                  type="date"
-                  {...form.register("diabetes.hbA1cDate")}
-                  placeholder="mm/dd/yyyy"
-                />
+          <div className="space-y-8">
+            {/* Diabetes Subsection */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-foreground border-b pb-2">Diabetes</h3>
+              <div className="grid gap-6 md:grid-cols-3">
+                {/* Row 1 */}
+                {["fastingGlucose", "randomGlucose"].map((field) => (
+                  <div key={field} className="space-y-3">
+                    <Label className="text-base">{field === "fastingGlucose" ? "Fasting Blood Glucose" : "Random Blood Glucose"}</Label>
+                    <Input
+                      {...form.register(`pointOfCare.diabetes.${field}` as any)}
+                      placeholder="mg/dL"
+                    />
+                  </div>
+                ))}
+                <div className="flex gap-3">
+                  <div className="flex-1 space-y-3">
+                    <Label className="text-base">HbA1c</Label>
+                    <Input
+                      {...form.register("pointOfCare.diabetes.hbA1cValue")}
+                      placeholder="e.g. 7.1%"
+                    />
+                  </div>
+                  <div className="flex-1 space-y-3">
+                    <Label className="text-base">Date</Label>
+                    <Input
+                      type="date"
+                      {...form.register("pointOfCare.diabetes.hbA1cDate")}
+                      placeholder="mm/dd/yyyy"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 2 */}
+                {["homeMonitoring", "averageReadings", "hypoglycemiaEpisodes"].map((field) => (
+                  <div key={field} className="space-y-3">
+                    <Label className="text-base">
+                      {field === "homeMonitoring" ? "Home Glucose Monitoring" : field === "averageReadings" ? "Average Readings" : "Hypoglycemia Episodes"}
+                    </Label>
+                    {field === "homeMonitoring" ? (
+                      <Select
+                        value={form.watch("pointOfCare.diabetes.homeMonitoring") || ""}
+                        onValueChange={(value) => form.setValue("pointOfCare.diabetes.homeMonitoring", value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                          <SelectItem value="Occasionally">Occasionally</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        {...form.register(`pointOfCare.diabetes.${field}` as any)}
+                        placeholder={field === "averageReadings" ? "mg/dL" : "Frequency / notes"}
+                      />
+                    )}
+                  </div>
+                ))}
+
+                {/* Row 3 */}
+                {["hyperglycemiaSymptoms", "footExam", "eyeExamDue"].map((field) => (
+                  <div key={field} className="space-y-3">
+                    <Label className="text-base">
+                      {field === "hyperglycemiaSymptoms" ? "Hyperglycemia Symptoms" : field === "footExam" ? "Foot Exam Performed" : "Eye Exam Due"}
+                    </Label>
+                    {field === "footExam" || field === "eyeExamDue" ? (
+                      <Select
+                        value={form.watch(`pointOfCare.diabetes.${field}`) || ""}
+                        onValueChange={(value) => form.setValue(`pointOfCare.diabetes.${field}`, value)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {field === "footExam" ? (
+                            <>
+                              <SelectItem value="Yes">Yes</SelectItem>
+                              <SelectItem value="No">No</SelectItem>
+                              <SelectItem value="Deferred">Deferred</SelectItem>
+                            </>
+                          ) : (
+                            <>
+                              <SelectItem value="Yes">Yes</SelectItem>
+                              <SelectItem value="No">No</SelectItem>
+                              <SelectItem value="Scheduled">Scheduled</SelectItem>
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        {...form.register(`pointOfCare.diabetes.${field}` as any)}
+                        placeholder="Symptoms noted"
+                      />
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Row 2 */}
-            {["homeMonitoring", "averageReadings", "hypoglycemiaEpisodes"].map((field) => (
-              <div key={field} className="space-y-3">
-                <Label className="text-base">
-                  {field === "homeMonitoring" ? "Home Glucose Monitoring" : field === "averageReadings" ? "Average Readings" : "Hypoglycemia Episodes"}
-                </Label>
-                {field === "homeMonitoring" ? (
+            {/* HIV Subsection */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-foreground border-b pb-2">HIV</h3>
+              <div className="grid gap-6 md:grid-cols-3">
+                <div className="space-y-3">
+                  <Label className="text-base">HIV Result</Label>
                   <Select
-                    value={form.watch("diabetes.homeMonitoring") || ""}
-                    onValueChange={(value) => form.setValue("diabetes.homeMonitoring", value)}
+                    value={form.watch("pointOfCare.hiv") || "Unknown"}
+                    onValueChange={(value) => form.setValue("pointOfCare.hiv", value)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Yes">Yes</SelectItem>
-                      <SelectItem value="No">No</SelectItem>
-                      <SelectItem value="Occasionally">Occasionally</SelectItem>
+                      <SelectItem value="Unknown">Unknown</SelectItem>
+                      <SelectItem value="negative">Negative</SelectItem>
+                      <SelectItem value="positive">Positive</SelectItem>
                     </SelectContent>
                   </Select>
-                ) : (
-                  <Input
-                    {...form.register(`diabetes.${field}` as any)}
-                    placeholder={field === "averageReadings" ? "mg/dL" : "Frequency / notes"}
-                  />
-                )}
+                </div>
               </div>
-            ))}
+            </div>
 
-            {/* Row 3 */}
-            {["hyperglycemiaSymptoms", "footExam", "eyeExamDue"].map((field) => (
-              <div key={field} className="space-y-3">
-                <Label className="text-base">
-                  {field === "hyperglycemiaSymptoms" ? "Hyperglycemia Symptoms" : field === "footExam" ? "Foot Exam Performed" : "Eye Exam Due"}
-                </Label>
-                {field === "footExam" || field === "eyeExamDue" ? (
+            {/* Syphilis Subsection */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-foreground border-b pb-2">Syphilis</h3>
+              <div className="grid gap-6 md:grid-cols-3">
+                <div className="space-y-3">
+                  <Label className="text-base">Result</Label>
                   <Select
-                    value={form.watch(`diabetes.${field}`) || ""}
-                    onValueChange={(value) => form.setValue(`diabetes.${field}`, value)}
+                    value={form.watch("pointOfCare.syphilis.result") || "Unknown"}
+                    onValueChange={(value) => form.setValue("pointOfCare.syphilis.result", value)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
                     </SelectTrigger>
                     <SelectContent>
-                      {field === "footExam" ? (
-                        <>
-                          <SelectItem value="Yes">Yes</SelectItem>
-                          <SelectItem value="No">No</SelectItem>
-                          <SelectItem value="Deferred">Deferred</SelectItem>
-                        </>
-                      ) : (
-                        <>
-                          <SelectItem value="Yes">Yes</SelectItem>
-                          <SelectItem value="No">No</SelectItem>
-                          <SelectItem value="Scheduled">Scheduled</SelectItem>
-                        </>
-                      )}
+                      <SelectItem value="Unknown">Unknown</SelectItem>
+                      <SelectItem value="positive">Positive</SelectItem>
+                      <SelectItem value="negative">Negative</SelectItem>
                     </SelectContent>
                   </Select>
-                ) : (
-                  <Input
-                    {...form.register(`diabetes.${field}` as any)}
-                    placeholder="Symptoms noted"
-                  />
-                )}
+                </div>
+                <div className="space-y-3">
+                  <Label className="text-base">Reactivity</Label>
+                  <Select
+                    value={form.watch("pointOfCare.syphilis.reactivity") || "Unknown"}
+                    onValueChange={(value) => form.setValue("pointOfCare.syphilis.reactivity", value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Unknown">Unknown</SelectItem>
+                      <SelectItem value="reactive">Reactive</SelectItem>
+                      <SelectItem value="non-reactive">Non-Reactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            ))}
+            </div>
           </div>
         );
       case "medications":
@@ -793,25 +1028,12 @@ export function NewVisitForm({
           <DocumentsSection form={form} patientId={patientId} visitId={visitIdRemote} />
         );
       case "assessmentPlan":
+        // Hide assessment & plan for nurses
+        if (userRole === "nurse") {
+          return null;
+        }
         return (
-          <div className="space-y-8">
-            <div className="space-y-3">
-              <Label className="text-base">Assessment</Label>
-              <Textarea
-                {...form.register("assessmentPlan.assessment")}
-                rows={8}
-                className="min-h-[200px]"
-              />
-            </div>
-            <div className="space-y-3">
-              <Label className="text-base">Plan</Label>
-              <Textarea
-                {...form.register("assessmentPlan.plan")}
-                rows={8}
-                className="min-h-[200px]"
-              />
-            </div>
-          </div>
+          <AssessmentPlanSection form={form} />
         );
       // Add other sections similarly...
       default:
@@ -871,9 +1093,18 @@ export function NewVisitForm({
         />
       </div>
 
-      <div className="grid gap-8 grid-cols-1 lg:grid-cols-4">
+      {/* Layout: Stacked on tablet in video call, side-by-side otherwise */}
+      <div className={cn(
+        "grid gap-8",
+        isInVideoCall
+          ? "grid-cols-1" // Stacked vertically on tablet in video call
+          : "grid-cols-1 lg:grid-cols-4"  // Normal layout: side-by-side on desktop
+      )}>
         {/* Left sidebar - Medical Info Panel, AI Capture, and Stepper */}
-        <div className="lg:col-span-1 space-y-4">
+        <div className={cn(
+          "space-y-4",
+          isInVideoCall ? "" : "lg:col-span-1"
+        )}>
           {/* Medical Info Panel - appears at top of left sidebar when open */}
           {medicalPanelOpen && medicalPanelSection && (
             <MedicalInfoPanel
@@ -899,13 +1130,17 @@ export function NewVisitForm({
                 currentSection={currentSection}
                 reviewedSections={reviewedSections}
                 onSectionClick={handleSectionChange}
+                userRole={userRole}
               />
             </CardContent>
           </Card>
         </div>
 
         {/* Main form area */}
-        <div className="lg:col-span-3 space-y-4">
+        <div className={cn(
+          "space-y-4",
+          isInVideoCall ? "" : "lg:col-span-3"
+        )}>
           <Card>
             <CardHeader className="pb-4">
               <CardTitle>
@@ -940,7 +1175,7 @@ export function NewVisitForm({
       {/* Footer */}
       <div className="sticky bottom-0 border-t bg-background p-4 flex items-center justify-between">
         <div className="text-sm text-muted-foreground">
-          {reviewedSections.size} of {visitSections.length} sections reviewed
+          {reviewedSections.size} of {roleSections.length} sections reviewed
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -1027,11 +1262,10 @@ function MedicationsSection({ form }: { form: any }) {
       // Filter out any old format medications (with 'name' instead of 'brandName'/'genericName')
       return medicationsValue.map((med: any) => {
         // If it's old format (has 'name' field), try to migrate
-        if (med.name && !med.brandName && !med.genericName) {
+        if (med.name && !med.brandName) {
           return {
             id: med.id || undefined,
             brandName: med.name || "",
-            genericName: "",
             strength: "",
             form: "",
             dosage: med.dosage || "",
@@ -1045,7 +1279,6 @@ function MedicationsSection({ form }: { form: any }) {
         return {
           id: med.id || undefined,
           brandName: med.brandName || "",
-          genericName: med.genericName || "",
           strength: med.strength || "",
           form: med.form || "",
           dosage: med.dosage || "",
@@ -1062,7 +1295,6 @@ function MedicationsSection({ form }: { form: any }) {
   const [editingIndex, setEditingIndex] = React.useState<number | null>(null);
   const [editData, setEditData] = React.useState({
     brandName: "",
-    genericName: "",
     strength: "",
     form: "",
     dosage: "",
@@ -1071,6 +1303,34 @@ function MedicationsSection({ form }: { form: any }) {
     notes: "",
   });
 
+  // Use refs to track latest values for cleanup
+  const editingIndexRef = React.useRef<number | null>(null);
+  const editDataRef = React.useRef(editData);
+
+  React.useEffect(() => {
+    editingIndexRef.current = editingIndex;
+    editDataRef.current = editData;
+  }, [editingIndex, editData]);
+
+  // Auto-save pending edits when component unmounts (section change)
+  React.useEffect(() => {
+    return () => {
+      // Save any pending edits when leaving the medications section
+      if (editingIndexRef.current !== null && editDataRef.current.brandName?.trim()) {
+        const current = getMedicationsArray();
+        const existingMed = current[editingIndexRef.current];
+        if (existingMed) {
+          current[editingIndexRef.current] = {
+            ...existingMed,
+            ...editDataRef.current,
+          };
+          form.setValue("medications", current);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Helper to ensure medications is always an array with proper structure
   const getMedicationsArray = () => {
     const value = form.getValues("medications");
@@ -1078,7 +1338,6 @@ function MedicationsSection({ form }: { form: any }) {
       return value.map((med: any) => ({
         id: med.id || undefined,
         brandName: med.brandName || "",
-        genericName: med.genericName || "",
         strength: med.strength || "",
         form: med.form || "",
         dosage: med.dosage || "",
@@ -1092,10 +1351,7 @@ function MedicationsSection({ form }: { form: any }) {
   };
 
   const getMedicationDisplayName = (med: any) => {
-    if (med.brandName && med.genericName) {
-      return `${med.brandName} (${med.genericName})`;
-    }
-    return med.brandName || med.genericName || "Unnamed Medication";
+    return med.brandName || "Unnamed Medication";
   };
 
   const getStatusBadge = (status: string) => {
@@ -1114,7 +1370,6 @@ function MedicationsSection({ form }: { form: any }) {
   const handleAdd = () => {
     const newMedication = {
       brandName: "",
-      genericName: "",
       strength: "",
       form: "",
       dosage: "",
@@ -1134,7 +1389,6 @@ function MedicationsSection({ form }: { form: any }) {
       setEditingIndex(index);
       setEditData({
         brandName: med.brandName || "",
-        genericName: med.genericName || "",
         strength: med.strength || "",
         form: med.form || "",
         dosage: med.dosage || "",
@@ -1156,7 +1410,6 @@ function MedicationsSection({ form }: { form: any }) {
     setEditingIndex(null);
     setEditData({
       brandName: "",
-      genericName: "",
       strength: "",
       form: "",
       dosage: "",
@@ -1170,7 +1423,6 @@ function MedicationsSection({ form }: { form: any }) {
     setEditingIndex(null);
     setEditData({
       brandName: "",
-      genericName: "",
       strength: "",
       form: "",
       dosage: "",
@@ -1201,19 +1453,11 @@ function MedicationsSection({ form }: { form: any }) {
               {editingIndex === index ? (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label>Brand Name</Label>
+                    <Label>Medication Name</Label>
                     <Input
                       value={editData.brandName}
                       onChange={(e) => setEditData({ ...editData, brandName: e.target.value })}
-                      placeholder="e.g., Tylenol"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Generic Name</Label>
-                    <Input
-                      value={editData.genericName}
-                      onChange={(e) => setEditData({ ...editData, genericName: e.target.value })}
-                      placeholder="e.g., Acetaminophen"
+                      placeholder="e.g., Amoxicillin 400 mg/5 mL"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -1273,7 +1517,7 @@ function MedicationsSection({ form }: { form: any }) {
                     <Textarea
                       value={editData.notes}
                       onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
-                      placeholder="Additional notes..."
+                      placeholder="Additional notes or linked diagnosis..."
                       rows={3}
                     />
                   </div>
@@ -1281,7 +1525,7 @@ function MedicationsSection({ form }: { form: any }) {
                     <Button
                       size="sm"
                       onClick={() => handleSave(index)}
-                      disabled={!editData.brandName?.trim() && !editData.genericName?.trim()}
+                      disabled={!editData.brandName?.trim()}
                     >
                       Save
                     </Button>
@@ -1664,6 +1908,34 @@ function FamilyHistorySection({ form }: { form: any }) {
     conditions: "",
   });
 
+  // Use refs to track latest values for cleanup
+  const editingIndexRef = React.useRef<number | null>(null);
+  const editDataRef = React.useRef(editData);
+
+  React.useEffect(() => {
+    editingIndexRef.current = editingIndex;
+    editDataRef.current = editData;
+  }, [editingIndex, editData]);
+
+  // Auto-save pending edits when component unmounts (section change)
+  React.useEffect(() => {
+    return () => {
+      // Save any pending edits when leaving the family history section
+      if (editingIndexRef.current !== null && editDataRef.current.relationship?.trim()) {
+        const current = getFamilyHistoryArray();
+        const existingEntry = current[editingIndexRef.current];
+        if (existingEntry) {
+          current[editingIndexRef.current] = {
+            ...existingEntry,
+            ...editDataRef.current,
+          };
+          form.setValue("familyHistory", current);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Helper to ensure familyHistory is always an array
   const getFamilyHistoryArray = () => {
     const value = form.getValues("familyHistory");
@@ -1881,6 +2153,34 @@ function SurgicalHistorySection({ form }: { form: any }) {
     outcome: "",
     source: "",
   });
+
+  // Use refs to track latest values for cleanup
+  const editingIndexRef = React.useRef<number | null>(null);
+  const editDataRef = React.useRef(editData);
+
+  React.useEffect(() => {
+    editingIndexRef.current = editingIndex;
+    editDataRef.current = editData;
+  }, [editingIndex, editData]);
+
+  // Auto-save pending edits when component unmounts (section change)
+  React.useEffect(() => {
+    return () => {
+      // Save any pending edits when leaving the surgical history section
+      if (editingIndexRef.current !== null && editDataRef.current.procedure?.trim()) {
+        const current = getSurgicalHistoryArray();
+        const existingEntry = current[editingIndexRef.current];
+        if (existingEntry) {
+          current[editingIndexRef.current] = {
+            ...existingEntry,
+            ...editDataRef.current,
+          };
+          form.setValue("surgicalHistory", current);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Helper to ensure surgicalHistory is always an array
   const getSurgicalHistoryArray = () => {
@@ -2130,6 +2430,34 @@ function PastMedicalHistorySection({ form }: { form: any }) {
     icd10: "",
     source: "",
   });
+
+  // Use refs to track latest values for cleanup
+  const editingIndexRef = React.useRef<number | null>(null);
+  const editDataRef = React.useRef(editData);
+
+  React.useEffect(() => {
+    editingIndexRef.current = editingIndex;
+    editDataRef.current = editData;
+  }, [editingIndex, editData]);
+
+  // Auto-save pending edits when component unmounts (section change)
+  React.useEffect(() => {
+    return () => {
+      // Save any pending edits when leaving the past medical history section
+      if (editingIndexRef.current !== null && editDataRef.current.condition?.trim()) {
+        const current = getPastMedicalHistoryArray();
+        const existingEntry = current[editingIndexRef.current];
+        if (existingEntry) {
+          current[editingIndexRef.current] = {
+            ...existingEntry,
+            ...editDataRef.current,
+          };
+          form.setValue("pastMedicalHistory", current);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Helper to ensure pastMedicalHistory is always an array
   const getPastMedicalHistoryArray = () => {
@@ -2391,6 +2719,34 @@ function OrdersSection({ form }: { form: any }) {
     dateOrdered: "",
   });
 
+  // Use refs to track latest values for cleanup
+  const editingIndexRef = React.useRef<number | null>(null);
+  const editDataRef = React.useRef(editData);
+
+  React.useEffect(() => {
+    editingIndexRef.current = editingIndex;
+    editDataRef.current = editData;
+  }, [editingIndex, editData]);
+
+  // Auto-save pending edits when component unmounts (section change)
+  React.useEffect(() => {
+    return () => {
+      // Save any pending edits when leaving the orders section
+      if (editingIndexRef.current !== null && (editDataRef.current.type?.trim() || editDataRef.current.details?.trim())) {
+        const current = getOrdersArray();
+        const existingEntry = current[editingIndexRef.current];
+        if (existingEntry) {
+          current[editingIndexRef.current] = {
+            ...existingEntry,
+            ...editDataRef.current,
+          };
+          form.setValue("orders", current);
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Helper to ensure orders is always an array
   const getOrdersArray = () => {
     const value = form.getValues("orders");
@@ -2611,6 +2967,460 @@ function OrdersSection({ form }: { form: any }) {
       >
         <Plus className="h-4 w-4 mr-2" />
         Add Order
+      </Button>
+    </div>
+  );
+}
+
+// Assessment & Plan Section Component
+function AssessmentPlanSection({ form }: { form: any }) {
+  const assessmentPlanValue = form.watch("assessmentPlan");
+  // Ensure assessmentPlan is always an array
+  const assessmentPlans = React.useMemo(() => {
+    // Handle migration from old format (object with assessment/plan) to new format (array)
+    if (!assessmentPlanValue) return [];
+    if (Array.isArray(assessmentPlanValue)) {
+      return assessmentPlanValue;
+    }
+    // If it's the old format (object with assessment/plan), convert to array
+    if (typeof assessmentPlanValue === "object" && "assessment" in assessmentPlanValue) {
+      const old = assessmentPlanValue as { assessment?: string; plan?: string };
+      if (old.assessment || old.plan) {
+        return [{
+          assessment: old.assessment || "",
+          plan: old.plan || "",
+          medications: [],
+          orders: [],
+          followUp: "",
+          education: "",
+          coordination: "",
+        }];
+      }
+    }
+    return [];
+  }, [assessmentPlanValue]);
+
+  const [editingIndex, setEditingIndex] = React.useState<number | null>(null);
+  const [editData, setEditData] = React.useState({
+    assessment: "",
+    plan: "",
+    medications: [] as Array<{ brandName: string; strength: string; form: string; dosage: string; frequency: string }>,
+    orders: [] as Array<{ type: string; priority: string; details: string; status: string; dateOrdered: string }>,
+    followUp: "",
+    education: "",
+    coordination: "",
+  });
+
+  // Helper to ensure assessmentPlan is always an array
+  const getAssessmentPlanArray = () => {
+    const value = form.getValues("assessmentPlan");
+    if (Array.isArray(value)) {
+      return value;
+    }
+    // Handle old format migration
+    if (value && typeof value === "object" && "assessment" in value) {
+      const old = value as { assessment?: string; plan?: string };
+      if (old.assessment || old.plan) {
+        return [{
+          assessment: old.assessment || "",
+          plan: old.plan || "",
+          medications: [],
+          orders: [],
+          followUp: "",
+          education: "",
+          coordination: "",
+        }];
+      }
+    }
+    return [];
+  };
+
+  const handleAdd = () => {
+    const newEntry = {
+      assessment: "",
+      plan: "",
+      medications: [],
+      orders: [],
+      followUp: "",
+      education: "",
+      coordination: "",
+    };
+    const current = getAssessmentPlanArray();
+    form.setValue("assessmentPlan", [...current, newEntry]);
+    setEditingIndex(current.length);
+    setEditData(newEntry);
+  };
+
+  const handleEdit = (index: number) => {
+    const entry = assessmentPlans[index];
+    if (entry) {
+      setEditingIndex(index);
+      setEditData({
+        assessment: entry.assessment || "",
+        plan: entry.plan || "",
+        medications: entry.medications || [],
+        orders: entry.orders || [],
+        followUp: entry.followUp || "",
+        education: entry.education || "",
+        coordination: entry.coordination || "",
+      });
+    }
+  };
+
+  const handleSave = (index: number) => {
+    const current = getAssessmentPlanArray();
+    current[index] = {
+      ...current[index],
+      ...editData,
+    };
+    form.setValue("assessmentPlan", current);
+    setEditingIndex(null);
+    setEditData({
+      assessment: "",
+      plan: "",
+      medications: [],
+      orders: [],
+      followUp: "",
+      education: "",
+      coordination: "",
+    });
+  };
+
+  const handleCancel = () => {
+    setEditingIndex(null);
+    setEditData({
+      assessment: "",
+      plan: "",
+      medications: [],
+      orders: [],
+      followUp: "",
+      education: "",
+      coordination: "",
+    });
+  };
+
+  const handleRemove = (index: number) => {
+    const current = getAssessmentPlanArray();
+    current.splice(index, 1);
+    form.setValue("assessmentPlan", current);
+    if (editingIndex === index) {
+      setEditingIndex(null);
+      setEditData({
+        assessment: "",
+        plan: "",
+        medications: [],
+        orders: [],
+        followUp: "",
+        education: "",
+        coordination: "",
+      });
+    }
+  };
+
+  const handleAddMedication = () => {
+    setEditData({
+      ...editData,
+      medications: [...editData.medications, { brandName: "", strength: "", form: "", dosage: "", frequency: "" }],
+    });
+  };
+
+  const handleUpdateMedication = (medIndex: number, field: string, value: string) => {
+    const updated = [...editData.medications];
+    updated[medIndex] = { ...updated[medIndex], [field]: value };
+    setEditData({ ...editData, medications: updated });
+  };
+
+  const handleRemoveMedication = (medIndex: number) => {
+    setEditData({
+      ...editData,
+      medications: editData.medications.filter((_, i) => i !== medIndex),
+    });
+  };
+
+  const handleAddOrder = () => {
+    setEditData({
+      ...editData,
+      orders: [...editData.orders, { type: "", priority: "", details: "", status: "", dateOrdered: "" }],
+    });
+  };
+
+  const handleUpdateOrder = (orderIndex: number, field: string, value: string) => {
+    const updated = [...editData.orders];
+    updated[orderIndex] = { ...updated[orderIndex], [field]: value };
+    setEditData({ ...editData, orders: updated });
+  };
+
+  const handleRemoveOrder = (orderIndex: number) => {
+    setEditData({
+      ...editData,
+      orders: editData.orders.filter((_, i) => i !== orderIndex),
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      {assessmentPlans.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          No assessment & plan entries yet
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {assessmentPlans.map((item: any, index: number) => (
+            <div
+              key={index}
+              className="border rounded-lg p-4 space-y-3 bg-card"
+            >
+              {editingIndex === index ? (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <Label className="text-base font-semibold">Assessment</Label>
+                    <Textarea
+                      value={editData.assessment}
+                      onChange={(e) => setEditData({ ...editData, assessment: e.target.value })}
+                      placeholder="e.g., Acute Otitis Media – New (H66.90)"
+                      rows={2}
+                      className="min-h-[60px]"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-base font-semibold">Plan</Label>
+                    <Textarea
+                      value={editData.plan}
+                      onChange={(e) => setEditData({ ...editData, plan: e.target.value })}
+                      placeholder="e.g., Start antibiotics."
+                      rows={2}
+                      className="min-h-[60px]"
+                    />
+                  </div>
+
+                  {/* Medications */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-base font-semibold">Medications</Label>
+                      <Button type="button" size="sm" variant="outline" onClick={handleAddMedication}>
+                        <Plus className="h-3 w-3 mr-1" />
+                        Add
+                      </Button>
+                    </div>
+                    {editData.medications.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-2">No medications added</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {editData.medications.map((med, medIndex) => (
+                          <div key={medIndex} className="border rounded p-3 space-y-2 bg-muted/30">
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input
+                                value={med.brandName}
+                                onChange={(e) => handleUpdateMedication(medIndex, "brandName", e.target.value)}
+                                placeholder="Medication name (e.g., Amoxicillin 400 mg/5 mL)"
+                                className="col-span-2"
+                              />
+                              <Input
+                                value={med.dosage}
+                                onChange={(e) => handleUpdateMedication(medIndex, "dosage", e.target.value)}
+                                placeholder="Dosage (e.g., 7.5 mL)"
+                              />
+                              <Input
+                                value={med.frequency}
+                                onChange={(e) => handleUpdateMedication(medIndex, "frequency", e.target.value)}
+                                placeholder="Frequency (e.g., PO BID x 10 days)"
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleRemoveMedication(medIndex)}
+                              className="w-full"
+                            >
+                              <Trash2 className="h-3 w-3 mr-1" />
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Orders */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-base font-semibold">Orders</Label>
+                      <Button type="button" size="sm" variant="outline" onClick={handleAddOrder}>
+                        <Plus className="h-3 w-3 mr-1" />
+                        Add
+                      </Button>
+                    </div>
+                    {editData.orders.length === 0 ? (
+                      <div className="text-sm text-muted-foreground py-2">No orders added</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {editData.orders.map((order, orderIndex) => (
+                          <div key={orderIndex} className="border rounded p-3 space-y-2 bg-muted/30">
+                            <Input
+                              value={order.details}
+                              onChange={(e) => handleUpdateOrder(orderIndex, "details", e.target.value)}
+                              placeholder="Order details"
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleRemoveOrder(orderIndex)}
+                              className="w-full"
+                            >
+                              <Trash2 className="h-3 w-3 mr-1" />
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-base font-semibold">Follow-up</Label>
+                    <Textarea
+                      value={editData.followUp}
+                      onChange={(e) => setEditData({ ...editData, followUp: e.target.value })}
+                      placeholder="e.g., PRN if no improvement in 48 hours"
+                      rows={2}
+                      className="min-h-[60px]"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-base font-semibold">Education</Label>
+                    <Textarea
+                      value={editData.education}
+                      onChange={(e) => setEditData({ ...editData, education: e.target.value })}
+                      placeholder="e.g., Discussed expected course and return precautions."
+                      rows={2}
+                      className="min-h-[60px]"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-base font-semibold">Coordination</Label>
+                    <Textarea
+                      value={editData.coordination}
+                      onChange={(e) => setEditData({ ...editData, coordination: e.target.value })}
+                      placeholder="e.g., None"
+                      rows={2}
+                      className="min-h-[60px]"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleSave(index)}
+                      disabled={!editData.assessment.trim() && !editData.plan.trim()}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCancel}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 space-y-4">
+                      {item.assessment && (
+                        <div>
+                          <div className="font-medium text-sm text-muted-foreground mb-1">Assessment:</div>
+                          <div className="text-sm whitespace-pre-wrap">{item.assessment}</div>
+                        </div>
+                      )}
+                      {item.plan && (
+                        <div>
+                          <div className="font-medium text-sm text-muted-foreground mb-1">Plan:</div>
+                          <div className="text-sm whitespace-pre-wrap">{item.plan}</div>
+                        </div>
+                      )}
+                      {item.medications && Array.isArray(item.medications) && item.medications.length > 0 && (
+                        <div>
+                          <div className="font-medium text-sm text-muted-foreground mb-1">Medications:</div>
+                          <div className="text-sm space-y-1">
+                            {item.medications.map((med: any, medIndex: number) => (
+                              <div key={medIndex} className="pl-2">
+                                {med.brandName} {med.dosage && med.dosage} {med.frequency && med.frequency}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {item.orders && Array.isArray(item.orders) && item.orders.length > 0 && (
+                        <div>
+                          <div className="font-medium text-sm text-muted-foreground mb-1">Orders:</div>
+                          <div className="text-sm space-y-1">
+                            {item.orders.map((order: any, orderIndex: number) => (
+                              <div key={orderIndex} className="pl-2">
+                                {order.details || "None"}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {item.followUp && (
+                        <div>
+                          <div className="font-medium text-sm text-muted-foreground mb-1">Follow-up:</div>
+                          <div className="text-sm whitespace-pre-wrap">{item.followUp}</div>
+                        </div>
+                      )}
+                      {item.education && (
+                        <div>
+                          <div className="font-medium text-sm text-muted-foreground mb-1">Education:</div>
+                          <div className="text-sm whitespace-pre-wrap">{item.education}</div>
+                        </div>
+                      )}
+                      {item.coordination && (
+                        <div>
+                          <div className="font-medium text-sm text-muted-foreground mb-1">Coordination:</div>
+                          <div className="text-sm whitespace-pre-wrap">{item.coordination}</div>
+                        </div>
+                      )}
+                      {!item.assessment && !item.plan && (
+                        <div className="text-sm text-muted-foreground">Empty entry</div>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleEdit(index)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleRemove(index)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        onClick={handleAdd}
+        className="w-full"
+      >
+        <Plus className="h-4 w-4 mr-2" />
+        Add Assessment & Plan
       </Button>
     </div>
   );

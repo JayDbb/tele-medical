@@ -46,29 +46,88 @@ export function mergeVisitNote(existing: VisitNote, aiParsed: Partial<VisitNote>
   if (aiParsed.objective && typeof aiParsed.objective === "object") {
     const existingObjective =
       existing.objective || createEmptyVisitNote().objective;
+    const emptyObjective = createEmptyVisitNote().objective;
+    
+    // Handle examFindings specially if it's an object
+    let mergedExamFindings = existingObjective.examFindings || emptyObjective.examFindings;
+    if (aiParsed.objective.examFindings) {
+      if (typeof aiParsed.objective.examFindings === "object" && !Array.isArray(aiParsed.objective.examFindings)) {
+        // New structured format
+        const existingExamFindings = typeof existingObjective.examFindings === "object" && !Array.isArray(existingObjective.examFindings)
+          ? existingObjective.examFindings
+          : emptyObjective.examFindings;
+        mergedExamFindings = {
+          general: mergeValue(existingExamFindings.general, aiParsed.objective.examFindings.general),
+          heent: mergeValue(existingExamFindings.heent, aiParsed.objective.examFindings.heent),
+          neck: mergeValue(existingExamFindings.neck, aiParsed.objective.examFindings.neck),
+          cardiovascular: mergeValue(existingExamFindings.cardiovascular, aiParsed.objective.examFindings.cardiovascular),
+          lungs: mergeValue(existingExamFindings.lungs, aiParsed.objective.examFindings.lungs),
+          abdomen: mergeValue(existingExamFindings.abdomen, aiParsed.objective.examFindings.abdomen),
+          musculoskeletal: mergeValue(existingExamFindings.musculoskeletal, aiParsed.objective.examFindings.musculoskeletal),
+          neurologic: mergeValue(existingExamFindings.neurologic, aiParsed.objective.examFindings.neurologic),
+          skin: mergeValue(existingExamFindings.skin, aiParsed.objective.examFindings.skin),
+        };
+      } else if (typeof aiParsed.objective.examFindings === "string") {
+        // Backward compatibility: if AI returns a string, keep existing structured format or convert
+        mergedExamFindings = typeof existingObjective.examFindings === "object" && !Array.isArray(existingObjective.examFindings)
+          ? existingObjective.examFindings
+          : { ...emptyObjective.examFindings, general: aiParsed.objective.examFindings };
+      }
+    }
+    
     merged.objective = {
       ...existingObjective,
       ...Object.fromEntries(
-        Object.entries(aiParsed.objective).map(([key, value]) => {
-          const existingValue = existingObjective[key as keyof typeof existingObjective];
-          return [key, mergeValue(existingValue, value)];
-        })
+        Object.entries(aiParsed.objective)
+          .filter(([key]) => key !== "examFindings")
+          .map(([key, value]) => {
+            const existingValue = existingObjective[key as keyof typeof existingObjective];
+            return [key, mergeValue(existingValue, value)];
+          })
       ),
+      examFindings: mergedExamFindings,
     };
   }
 
-  // Merge diabetes
-  if (aiParsed.diabetes && typeof aiParsed.diabetes === "object") {
-    const existingDiabetes =
-      existing.diabetes || createEmptyVisitNote().diabetes;
-    merged.diabetes = {
-      ...existingDiabetes,
-      ...Object.fromEntries(
-        Object.entries(aiParsed.diabetes).map(([key, value]) => {
-          const existingValue = existingDiabetes[key as keyof typeof existingDiabetes];
-          return [key, mergeValue(existingValue, value)];
-        })
-      ),
+  // Merge pointOfCare
+  if (aiParsed.pointOfCare && typeof aiParsed.pointOfCare === "object") {
+    const existingPointOfCare =
+      existing.pointOfCare || createEmptyVisitNote().pointOfCare;
+    const emptyPointOfCare = createEmptyVisitNote().pointOfCare;
+    
+    // Merge diabetes subsection
+    let mergedDiabetes = existingPointOfCare.diabetes || emptyPointOfCare.diabetes;
+    if (aiParsed.pointOfCare.diabetes && typeof aiParsed.pointOfCare.diabetes === "object") {
+      mergedDiabetes = {
+        ...mergedDiabetes,
+        ...Object.fromEntries(
+          Object.entries(aiParsed.pointOfCare.diabetes).map(([key, value]) => {
+            const existingValue = mergedDiabetes[key as keyof typeof mergedDiabetes];
+            return [key, mergeValue(existingValue, value)];
+          })
+        ),
+      };
+    }
+
+    // Merge HIV
+    const mergedHiv = aiParsed.pointOfCare.hiv !== undefined
+      ? mergeValue(existingPointOfCare.hiv, aiParsed.pointOfCare.hiv)
+      : (existingPointOfCare.hiv || "");
+
+    // Merge syphilis
+    let mergedSyphilis = existingPointOfCare.syphilis || emptyPointOfCare.syphilis;
+    if (aiParsed.pointOfCare.syphilis && typeof aiParsed.pointOfCare.syphilis === "object") {
+      mergedSyphilis = {
+        result: mergeValue(mergedSyphilis.result, aiParsed.pointOfCare.syphilis.result),
+        reactivity: mergeValue(mergedSyphilis.reactivity, aiParsed.pointOfCare.syphilis.reactivity),
+      };
+    }
+
+    // Combine all merged subsections
+    merged.pointOfCare = {
+      diabetes: mergedDiabetes,
+      hiv: mergedHiv,
+      syphilis: mergedSyphilis,
     };
   }
 
@@ -78,20 +137,65 @@ export function mergeVisitNote(existing: VisitNote, aiParsed: Partial<VisitNote>
     merged.medications = [...existingMedications, ...aiParsed.medications];
   }
 
-  // Merge assessmentPlan
-  if (aiParsed.assessmentPlan && typeof aiParsed.assessmentPlan === "object") {
-    const existingAssessmentPlan =
-      existing.assessmentPlan || createEmptyVisitNote().assessmentPlan;
-    merged.assessmentPlan = {
-      assessment: mergeValue(
-        existingAssessmentPlan.assessment,
-        aiParsed.assessmentPlan.assessment
-      ),
-      plan: mergeValue(
-        existingAssessmentPlan.plan,
-        aiParsed.assessmentPlan.plan
-      ),
-    };
+  // Merge assessmentPlan - handle both old format (object) and new format (array)
+  if (aiParsed.assessmentPlan) {
+    const existingAssessmentPlan = existing.assessmentPlan || createEmptyVisitNote().assessmentPlan;
+    const emptyAssessmentPlan = createEmptyVisitNote().assessmentPlan;
+    
+    if (Array.isArray(aiParsed.assessmentPlan)) {
+      // New format: array of assessment-plan pairs
+      const existingArray = Array.isArray(existingAssessmentPlan) ? existingAssessmentPlan : [];
+      // Append new entries from AI
+      merged.assessmentPlan = [...existingArray, ...aiParsed.assessmentPlan];
+    } else {
+      // Old format: object with assessment/plan, or migration case
+      // Use type assertion since we're handling legacy data that might be in old format
+      const oldFormat = aiParsed.assessmentPlan as any;
+      if (oldFormat && typeof oldFormat === "object" && ("assessment" in oldFormat || "plan" in oldFormat)) {
+        // Convert old format to new array format
+        // Ensure existing array entries have all required properties
+        const existingArray = Array.isArray(existingAssessmentPlan) 
+          ? existingAssessmentPlan.map(entry => ({
+              assessment: entry.assessment || "",
+              plan: entry.plan || "",
+              medications: entry.medications || [],
+              orders: entry.orders || [],
+              followUp: entry.followUp || "",
+              education: entry.education || "",
+              coordination: entry.coordination || "",
+            }))
+          : (existingAssessmentPlan && typeof existingAssessmentPlan === "object" && "assessment" in existingAssessmentPlan
+              ? [{
+                  assessment: (existingAssessmentPlan as any).assessment || "",
+                  plan: (existingAssessmentPlan as any).plan || "",
+                  medications: (existingAssessmentPlan as any).medications || [],
+                  orders: (existingAssessmentPlan as any).orders || [],
+                  followUp: (existingAssessmentPlan as any).followUp || "",
+                  education: (existingAssessmentPlan as any).education || "",
+                  coordination: (existingAssessmentPlan as any).coordination || "",
+                }]
+              : []);
+        
+        const newEntry = {
+          assessment: oldFormat.assessment || "",
+          plan: oldFormat.plan || "",
+          medications: oldFormat.medications || [],
+          orders: oldFormat.orders || [],
+          followUp: oldFormat.followUp || "",
+          education: oldFormat.education || "",
+          coordination: oldFormat.coordination || "",
+        };
+        
+        // Only add if it has content
+        if (newEntry.assessment || newEntry.plan) {
+          merged.assessmentPlan = [...existingArray, newEntry];
+        } else {
+          merged.assessmentPlan = existingArray;
+        }
+      } else {
+        merged.assessmentPlan = Array.isArray(existingAssessmentPlan) ? existingAssessmentPlan : emptyAssessmentPlan;
+      }
+    }
   }
 
   // Append arrays (new items are added, but we could deduplicate if needed)

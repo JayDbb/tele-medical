@@ -260,7 +260,7 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
       </div>
 
       {/* Patient Cards */}
-      <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
         {filteredAndSortedPatients.map((patient) => {
           const waitTime = getWaitTime(patient.visit);
           const priorityBadge = getPriorityBadge(patient.visit?.priority ?? null);
@@ -313,11 +313,11 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
                     patientId={patient.id}
                     visitId={virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}
                     joinUrl={
-                      patient.visit?.patientJoinToken
-                        ? `${typeof window !== 'undefined' ? window.location.origin : ''}/join/${patient.visit.patientJoinToken}`
-                        : virtualVisitData[patient.id]?.joinUrl || ""
+                      typeof window !== 'undefined'
+                        ? `${window.location.origin}/visit/${virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}/call`
+                        : ""
                     }
-                    onJoin={() => router.push(`/visit/${virtualVisitData[patient.id]?.visitId || patient.visit?.id}/call`)}
+                    onJoin={() => router.push(`/visit/${virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}/call`)}
                   />
                 ) : (
                   <Button
@@ -374,11 +374,11 @@ function VirtualAppointmentActions({
         <Video className="h-4 w-4 mr-2" />
         Join Call
       </Button>
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-nowrap">
         <Button
           onClick={() => setShowQR(true)}
           variant="outline"
-          className="flex-1"
+          className="flex-1 min-w-0"
           size="sm"
         >
           <QrCode className="h-4 w-4 mr-1" />
@@ -387,7 +387,7 @@ function VirtualAppointmentActions({
         <Button
           onClick={handleCopy}
           variant="outline"
-          className="flex-1"
+          className="flex-1 min-w-0"
           size="sm"
         >
           {copied ? (
@@ -406,9 +406,9 @@ function VirtualAppointmentActions({
       <Dialog open={showQR} onOpenChange={setShowQR}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>Patient Join Link</DialogTitle>
+            <DialogTitle>Doctor Join Link</DialogTitle>
             <DialogDescription>
-              Share this QR code or link with the patient to join the call
+              Scan this QR code or copy the link to join the call
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">

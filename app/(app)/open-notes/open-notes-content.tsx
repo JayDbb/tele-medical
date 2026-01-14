@@ -161,7 +161,7 @@ export function OpenNotesContent({ visits }: OpenNotesContentProps) {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
           {filteredVisits.map((visit) => {
             const statusBadge = getStatusBadge(visit.status);
             const priorityBadge = getPriorityBadge(visit.priority);
@@ -252,7 +252,7 @@ function VirtualAppointmentActions({
   const [copied, setCopied] = useState(false);
 
   const joinUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/join/${patientJoinToken}`
+    ? `${window.location.origin}/visit/${visitId}/call`
     : "";
 
   const handleCopyLink = async () => {
@@ -279,11 +279,11 @@ function VirtualAppointmentActions({
           <Video className="h-4 w-4 mr-2" />
           Join Call
         </Button>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-nowrap">
           <Button
             variant="outline"
             size="sm"
-            className="flex-1"
+            className="flex-1 min-w-0"
             onClick={() => setShowQR(true)}
           >
             <QrCode className="h-4 w-4 mr-1" />
@@ -292,7 +292,7 @@ function VirtualAppointmentActions({
           <Button
             variant="outline"
             size="sm"
-            className="flex-1"
+            className="flex-1 min-w-0"
             onClick={handleCopyLink}
           >
             {copied ? (
@@ -314,11 +314,11 @@ function VirtualAppointmentActions({
       <Dialog open={showQR} onOpenChange={setShowQR}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Patient Join Link</DialogTitle>
+            <DialogTitle>Doctor Join Link</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col items-center gap-4 py-4">
             <p className="text-sm text-muted-foreground text-center">
-              Share this QR code or link with the patient to join the call
+              Scan this QR code or copy the link to join the call
             </p>
             {joinUrl && (
               <div className="p-4 bg-white rounded-lg">

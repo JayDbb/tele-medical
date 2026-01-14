@@ -18,7 +18,7 @@ const RATE_LIMIT_COOLDOWN = 10000; // 10 seconds cooldown after rate limit
 /**
  * Middleware to handle authentication and route protection.
  * - Unauthenticated users accessing protected routes are redirected to /sign-in
- * - Authenticated users accessing auth pages are redirected to /dashboard
+ * - Authenticated users accessing auth pages are redirected to /
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -34,7 +34,9 @@ export async function middleware(request: NextRequest) {
   }
 
   // Check if the current path is a public/auth route
-  const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
+  const isPublicRoute = publicRoutes.some((route) =>
+    pathname.startsWith(route)
+  );
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
 
   try {
@@ -44,31 +46,39 @@ export async function middleware(request: NextRequest) {
     // This will check cookies automatically if they're set by Supabase
     let isAuthenticated = false;
     let user = null;
-    
+
     // Skip auth check if we're in a rate limit cooldown period
     const now = Date.now();
     const inCooldown = now - lastRateLimitTime < RATE_LIMIT_COOLDOWN;
-    
+
     if (!inCooldown) {
       try {
         const {
           data: { user: authUser },
           error,
         } = await supabase.auth.getUser();
-        
+
         // Handle rate limiting gracefully - allow request through if rate limited
-        if (error?.status === 429 || error?.code === "over_request_rate_limit" || error?.message?.includes("rate limit")) {
+        if (
+          error?.status === 429 ||
+          error?.code === "over_request_rate_limit" ||
+          error?.message?.includes("rate limit")
+        ) {
           lastRateLimitTime = now;
           // Silently allow request through - don't log to reduce spam
           // Treat as unauthenticated to avoid redirect loops
           return response;
         }
-        
+
         user = authUser;
         isAuthenticated = !!user && !error;
       } catch (authError: any) {
         // Handle rate limiting or other auth errors
-        if (authError?.status === 429 || authError?.code === "over_request_rate_limit" || authError?.message?.includes("rate limit")) {
+        if (
+          authError?.status === 429 ||
+          authError?.code === "over_request_rate_limit" ||
+          authError?.message?.includes("rate limit")
+        ) {
           lastRateLimitTime = now;
           // Silently allow request through - don't log to reduce spam
           return response;
@@ -81,19 +91,19 @@ export async function middleware(request: NextRequest) {
     // If user is authenticated and trying to access auth pages, redirect to role-specific page
     if (isAuthenticated && isAuthRoute && user) {
       const redirectUrl = request.nextUrl.clone();
-      
+
       // Get user role from metadata
       const role = (user.user_metadata?.role as string) || "patient";
-      
+
       // Redirect based on role
       if (role === "doctor") {
         redirectUrl.pathname = "/waiting-room";
       } else if (role === "nurse") {
         redirectUrl.pathname = "/patients";
       } else {
-        redirectUrl.pathname = "/dashboard";
+        redirectUrl.pathname = "/";
       }
-      
+
       return NextResponse.redirect(redirectUrl);
     }
 
@@ -126,4 +136,3 @@ export const config = {
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
-

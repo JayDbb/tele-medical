@@ -52,21 +52,24 @@ export function CallPageContent({
   }, [isConnected, patientId]);
   const [isMuted, setIsMuted] = React.useState(false);
   const [isVideoOff, setIsVideoOff] = React.useState(false);
-  const [showPatientInfo, setShowPatientInfo] = React.useState(true);
+  const [showPatientInfo, setShowPatientInfo] = React.useState(false); // Default to closed - user can open when needed
   const [isMobile, setIsMobile] = React.useState(false);
+  const [isTablet, setIsTablet] = React.useState(false);
   const [room, setRoom] = React.useState<any>(null);
   const [showEndCallDialog, setShowEndCallDialog] = React.useState(false);
   const saveVisitRef = React.useRef<(() => Promise<void>) | null>(null);
 
-  // Detect mobile device
+  // Detect mobile and tablet devices
   React.useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768); // md breakpoint
+    const checkDevice = () => {
+      const width = window.innerWidth;
+      setIsMobile(width < 768); // md breakpoint
+      setIsTablet(width >= 768 && width < 1280); // md to xl (iPad range)
     };
 
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
+    checkDevice();
+    window.addEventListener("resize", checkDevice);
+    return () => window.removeEventListener("resize", checkDevice);
   }, []);
   const [localTrack, setLocalTrack] = React.useState<any>(null);
   const [remoteTracks, setRemoteTracks] = React.useState<any[]>([]);
@@ -124,8 +127,42 @@ export function CallPageContent({
   React.useEffect(() => {
     if (!token || !roomName) return;
 
+    // Prevent multiple simultaneous connection attempts
+    let isConnecting = false;
+    let connectionAborted = false;
+
     const connectToRoom = async () => {
+      // If already connecting or connected, don't try again
+      if (isConnecting || roomRef.current) {
+        console.log("Already connecting or connected, skipping");
+        return;
+      }
+
+      isConnecting = true;
+
       try {
+        // IMPORTANT: Disconnect from any existing room connection first
+        // This prevents "duplicate identity" errors
+        if (roomRef.current) {
+          console.log("Disconnecting from existing room before reconnecting");
+          try {
+            roomRef.current.disconnect();
+            // Wait a bit for disconnect to complete
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } catch (disconnectError) {
+            console.error("Error disconnecting existing room:", disconnectError);
+          }
+          roomRef.current = null;
+          setRoom(null);
+          setIsConnected(false);
+        }
+
+        // Check if connection was aborted (component unmounted or dependencies changed)
+        if (connectionAborted) {
+          console.log("Connection aborted");
+          return;
+        }
+
         const { connect, createLocalVideoTrack, createLocalAudioTrack } = await import("twilio-video");
 
         // Create local tracks
@@ -288,9 +325,35 @@ export function CallPageContent({
 
         // Handle existing participants (patient)
         twilioRoom.participants.forEach(handleParticipant);
+
+        isConnecting = false;
       } catch (error) {
+        isConnecting = false;
         console.error("Error connecting to room:", error);
-        toast.error("Failed to connect to video call");
+
+        // Check if it's a duplicate identity error
+        if (error instanceof Error && error.message.includes("duplicate identity")) {
+          console.log("Duplicate identity error - disconnecting and retrying");
+          // Disconnect and wait before retrying
+          if (roomRef.current) {
+            try {
+              roomRef.current.disconnect();
+            } catch (e) {
+              // Ignore disconnect errors
+            }
+            roomRef.current = null;
+            setRoom(null);
+            setIsConnected(false);
+          }
+          // Retry after a delay
+          setTimeout(() => {
+            if (!connectionAborted) {
+              connectToRoom();
+            }
+          }, 1000);
+        } else {
+          toast.error("Failed to connect to video call");
+        }
       }
     };
 
@@ -298,6 +361,7 @@ export function CallPageContent({
 
     // Cleanup function - will run when dependencies change or component unmounts
     return () => {
+      connectionAborted = true;
       cleanupTwilioConnection();
     };
   }, [token, roomName]);
@@ -671,10 +735,10 @@ export function CallPageContent({
           </div>
         </div>
 
-        {/* Patient Info Panel - Desktop: Side Panel */}
-        {showPatientInfo && (
-          <div className="hidden md:flex flex-col h-full w-[50%] border-l bg-background shadow-2xl overflow-y-auto z-20">
-            <div className="p-6 border-b flex items-center justify-between sticky top-0 bg-background z-10">
+        {/* Patient Info Panel - Desktop (xl+): Side Panel */}
+        {showPatientInfo && !isTablet && (
+          <div className="hidden xl:flex flex-col h-full w-[450px] bg-background overflow-y-auto z-20">
+            <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-background z-10">
               <h2 className="font-semibold text-lg">Notes</h2>
               <Button
                 variant="ghost"
@@ -683,10 +747,10 @@ export function CallPageContent({
                 className="gap-2"
               >
                 <ChevronRight className="h-4 w-4" />
-                <span className="hidden lg:inline">Collapse</span>
+                <span>Collapse</span>
               </Button>
             </div>
-            <div className="p-6">
+            <div className="p-4">
               <NewVisitForm
                 patientId={patientId}
                 patientBasics={patientBasics}
@@ -700,11 +764,48 @@ export function CallPageContent({
                 hideAICapture={true}
                 initialParsedData={parsedNoteData}
                 onSaveReadyRef={saveVisitRef}
+                isInVideoCall={true}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Patient Info Panel - Tablet (iPad): Side Panel (wider) */}
+        {showPatientInfo && isTablet && (
+          <div className="hidden md:flex xl:hidden flex-col h-full w-[45%] min-w-[500px] max-w-[600px] bg-background overflow-y-auto z-20">
+            <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-background z-10">
+              <h2 className="font-semibold text-lg">Notes</h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowPatientInfo(false)}
+                className="gap-2"
+              >
+                <ChevronRight className="h-4 w-4" />
+                <span>Collapse</span>
+              </Button>
+            </div>
+            <div className="p-4">
+              <NewVisitForm
+                patientId={patientId}
+                patientBasics={patientBasics}
+                userId={userId}
+                userRole={userRole}
+                existingVisitId={visitId}
+                existingVisitData={existingVisitData}
+                isRecording={isRecording}
+                onStartRecording={handleStartRecording}
+                onStopRecording={handleStopRecording}
+                hideAICapture={true}
+                initialParsedData={parsedNoteData}
+                onSaveReadyRef={saveVisitRef}
+                isInVideoCall={true}
               />
             </div>
           </div>
         )}
       </div>
+
 
       {/* Patient Info Panel - Mobile: Modal */}
       <Dialog
@@ -734,6 +835,7 @@ export function CallPageContent({
               initialParsedData={parsedNoteData}
               onParseReadyRef={parseReadyCallbackRef}
               onSaveReadyRef={saveVisitRef}
+              isInVideoCall={true}
             />
           </div>
         </DialogContent>

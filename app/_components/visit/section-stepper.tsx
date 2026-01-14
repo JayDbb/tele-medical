@@ -9,10 +9,10 @@ export interface VisitSection {
   label: string;
 }
 
-const sections: VisitSection[] = [
+const allSections: VisitSection[] = [
   { id: "subjective", label: "Subjective" },
   { id: "objective", label: "Objective" },
-  { id: "diabetes", label: "Diabetes" },
+  { id: "pointOfCare", label: "Point of Care" },
   { id: "vaccines", label: "Vaccines" },
   { id: "familyHistory", label: "Family History" },
   { id: "riskFlags", label: "Risk Flags" },
@@ -24,10 +24,34 @@ const sections: VisitSection[] = [
   { id: "assessmentPlan", label: "Assessment & Plan" },
 ];
 
+/**
+ * Get sections filtered and ordered based on user role
+ */
+export function getSectionsForRole(userRole?: string): VisitSection[] {
+  if (userRole === "nurse") {
+    // For nurses: exclude assessmentPlan, and reorder so objective is 2nd to last, subjective is last
+    // Filter out assessmentPlan, objective, and subjective
+    const otherSections = allSections.filter(
+      s => s.id !== "assessmentPlan" && s.id !== "objective" && s.id !== "subjective"
+    );
+    
+    // Build result: other sections, then objective (2nd to last), then subjective (last)
+    const result = [...otherSections];
+    result.push({ id: "objective", label: "Objective" });
+    result.push({ id: "subjective", label: "Subjective" });
+    
+    return result;
+  }
+  
+  // For doctors: return all sections in original order
+  return allSections;
+}
+
 interface SectionStepperProps {
   currentSection: string;
   reviewedSections: Set<string>;
   onSectionClick: (sectionId: string) => void;
+  userRole?: string;
   className?: string;
 }
 
@@ -35,8 +59,11 @@ export function SectionStepper({
   currentSection,
   reviewedSections,
   onSectionClick,
+  userRole,
   className,
 }: SectionStepperProps) {
+  const sections = getSectionsForRole(userRole);
+  
   return (
     <div className={cn("space-y-1", className)}>
       <h3 className="text-sm font-semibold text-foreground mb-3">
@@ -73,5 +100,6 @@ export function SectionStepper({
   );
 }
 
-export { sections as visitSections };
+// Export all sections for backward compatibility (used in other places)
+export { allSections as visitSections };
 

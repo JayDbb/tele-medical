@@ -132,6 +132,20 @@ export async function POST(
         .filter((f) => f.name.startsWith("chunk-"))
         .sort((a, b) => a.name.localeCompare(b.name));
 
+      // Extract chunk indices for logging
+      const chunkIndices = chunkFiles.map((f) => {
+        const match = f.name.match(/chunk-(\d+)/);
+        return match ? parseInt(match[1], 10) : -1;
+      }).filter(idx => idx >= 0).sort((a, b) => a - b);
+
+      console.log("Chunks found for finalization", {
+        sessionPath,
+        recordingSessionId,
+        totalChunks: chunkFiles.length,
+        chunkIndices: chunkIndices.slice(0, 10), // First 10 for logging
+        hasGaps: chunkIndices.length > 0 && chunkIndices[chunkIndices.length - 1] - chunkIndices[0] + 1 !== chunkIndices.length,
+      });
+
       if (chunkFiles.length === 0) {
         console.warn("No valid chunk files found for session", { sessionPath, recordingSessionId, files: files.map(f => f.name) });
         // Return success but with a message indicating no valid chunks

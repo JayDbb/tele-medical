@@ -52,6 +52,8 @@ export function useCallRecorder({
   const recordingSessionIdRef = useRef<string | null>(null);
   const isStoppingRef = useRef<boolean>(false); // Guard against multiple simultaneous stop calls
   const uploadPromisesRef = useRef<Promise<void>[]>([]); // Track all chunk upload promises
+  const recordingStartTimeRef = useRef<number>(0); // Track when recording started
+  const uploadedChunkIndicesRef = useRef<Set<number>>(new Set()); // Track which chunk indices have been uploaded
 
   // Get best supported MIME type
   const getBestMimeType = useCallback(() => {
@@ -389,6 +391,9 @@ export function useCallRecorder({
         .substr(2, 9)}`;
       recordingSessionIdRef.current = sessionId;
       chunkIndexRef.current = 0;
+      recordingStartTimeRef.current = Date.now();
+      uploadedChunkIndicesRef.current = new Set();
+      uploadPromisesRef.current = [];
 
       // Track upload status
       let pendingUploads = 0;
@@ -414,16 +419,24 @@ export function useCallRecorder({
 
       // Handle data available (chunks)
       const chunks: Blob[] = [];
+      const chunkTimestamps: number[] = []; // Track when chunks are received
       mediaRecorder.ondataavailable = async (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           chunks.push(event.data);
           const currentChunkIndex = chunkIndexRef.current;
+          const chunkSize = event.data.size;
+          const timestamp = Date.now();
+          chunkTimestamps.push(timestamp);
+          console.log(`Chunk ${currentChunkIndex} received: ${chunkSize} bytes at ${new Date(timestamp).toISOString()}`);
           chunkIndexRef.current++;
 
           // Upload chunk asynchronously and track the promise
+          // Don't await - let it upload in background
           incrementUploads();
           const uploadPromise = uploadChunk(event.data, currentChunkIndex, sessionId, mimeType)
             .then(() => {
+              console.log(`Chunk ${currentChunkIndex} uploaded successfully`);
+              uploadedChunkIndicesRef.current.add(currentChunkIndex);
               decrementUploads();
             })
             .catch((error) => {
@@ -431,12 +444,21 @@ export function useCallRecorder({
                 `Error uploading chunk ${currentChunkIndex}:`,
                 error
               );
+              // Even if upload fails, the chunk is saved locally for retry
               decrementUploads();
               throw error; // Re-throw to keep promise rejected
             });
           uploadPromisesRef.current.push(uploadPromise);
+        } else {
+          console.warn("Received empty chunk data", {
+            hasData: !!event.data,
+            size: event.data?.size || 0,
+          });
         }
       };
+      
+      // Store chunk timestamps for debugging
+      (mediaRecorder as any).__chunkTimestamps = chunkTimestamps;
 
       // Handle errors - don't auto-stop on error, just log
       mediaRecorder.onerror = (event: any) => {
@@ -486,12 +508,14 @@ export function useCallRecorder({
         );
       };
 
-      // Start recording with 2 second timeslices
+      // Start recording with 1 second timeslices for better chunk granularity
+      // Smaller timeslices help ensure all data is captured, especially on iPad
       try {
-        mediaRecorder.start(2000);
+        mediaRecorder.start(1000); // Changed from 2000ms to 1000ms
         console.log("MediaRecorder started successfully", {
           state: mediaRecorder.state,
           mimeType: mediaRecorder.mimeType,
+          timeslice: 1000,
         });
 
         // Verify it's actually recording after a brief moment
@@ -625,7 +649,16 @@ export function useCallRecorder({
         // REPLACE the onstop handler (the guard handler will have already checked the flag)
         // Now we set the actual finalization handler
         mediaRecorder.onstop = async () => {
-          console.log("onstop handler in stopRecording called");
+          const chunkTimestamps = (mediaRecorder as any).__chunkTimestamps || [];
+          const recordingDuration = chunkTimestamps.length > 0 
+            ? chunkTimestamps[chunkTimestamps.length - 1] - chunkTimestamps[0]
+            : 0;
+          console.log("onstop handler in stopRecording called", {
+            totalChunks: uploadPromisesRef.current.length,
+            chunkTimestampsCount: chunkTimestamps.length,
+            estimatedDuration: `${(recordingDuration / 1000).toFixed(1)}s`,
+            recorderState: mediaRecorder.state,
+          });
           try {
             // Wait for any pending uploads to complete (but don't show uploading status)
             setState((prev) => ({
@@ -638,21 +671,106 @@ export function useCallRecorder({
             // Wait for all pending chunk uploads to complete
             // This is critical for iPad where the final chunk might be delayed
             const uploadPromises = uploadPromisesRef.current || [];
+            const expectedChunks = chunkIndexRef.current; // Total chunks that should have been created
+            const recordingDuration = Date.now() - recordingStartTimeRef.current;
+            const expectedChunkCount = Math.ceil(recordingDuration / 1000); // 1 chunk per second
+            
+            console.log("Waiting for chunk uploads", {
+              totalPromises: uploadPromises.length,
+              expectedChunks,
+              expectedChunkCount,
+              recordingDuration: `${(recordingDuration / 1000).toFixed(1)}s`,
+              uploadedChunks: uploadedChunkIndicesRef.current.size,
+            });
+
             if (uploadPromises.length > 0) {
-              console.log(`Waiting for ${uploadPromises.length} chunk uploads to complete...`);
               try {
-                // Wait for all uploads with a timeout (max 10 seconds)
-                await Promise.race([
+                // Wait for all uploads with a longer timeout (max 30 seconds for iPad)
+                const results = await Promise.race([
                   Promise.allSettled(uploadPromises),
-                  new Promise((r) => setTimeout(r, 10000)),
+                  new Promise<PromiseSettledResult<void>[]>((r) => setTimeout(() => r([]), 30000)),
                 ]);
-                console.log("All chunk uploads completed or timed out");
+                const successful = results.filter(r => r.status === 'fulfilled').length;
+                const failed = results.filter(r => r.status === 'rejected').length;
+                console.log("Chunk uploads completed", {
+                  total: uploadPromises.length,
+                  successful,
+                  failed,
+                  uploadedChunkCount: uploadedChunkIndicesRef.current.size,
+                });
+                
+                // If we have failed uploads, wait a bit more and check again
+                if (failed > 0) {
+                  console.warn(`Some chunks failed to upload (${failed}), waiting additional time for retries...`);
+                  await new Promise((r) => setTimeout(r, 3000));
+                }
               } catch (error) {
                 console.warn("Error waiting for uploads:", error);
               }
             } else {
+              console.warn("No upload promises found - this might indicate chunks weren't captured");
               // Give a moment for any final chunk to be emitted and uploaded
-              await new Promise((r) => setTimeout(r, 500));
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+
+            // Verify all chunks are uploaded by checking with the server
+            // This is important for iPad where chunks might be delayed
+            console.log("Verifying all chunks are uploaded before finalizing...");
+            let verificationAttempts = 0;
+            const maxVerificationAttempts = 3;
+            const minWaitTime = 2000; // Minimum 2 seconds between checks
+            
+            while (verificationAttempts < maxVerificationAttempts) {
+              try {
+                // Check with server to see how many chunks are actually uploaded
+                const verifyResponse = await fetch(
+                  `/api/visits/${visitId}/recording/verify-chunks?sessionId=${recordingSessionIdRef.current}`,
+                  { method: "GET" }
+                );
+                
+                if (verifyResponse.ok) {
+                  const verifyData = await verifyResponse.json();
+                  const serverChunkCount = verifyData.chunkCount || 0;
+                  const expectedCount = Math.max(expectedChunkCount, expectedChunks);
+                  
+                  console.log("Chunk verification", {
+                    serverChunkCount,
+                    expectedCount,
+                    uploadedChunkIndices: Array.from(uploadedChunkIndicesRef.current).sort((a, b) => a - b),
+                    attempt: verificationAttempts + 1,
+                  });
+                  
+                  // If we have at least 85% of expected chunks, proceed (allows for some margin)
+                  // Or if this is our last attempt
+                  if (serverChunkCount >= expectedCount * 0.85 || verificationAttempts >= maxVerificationAttempts - 1) {
+                    console.log("Chunks verified, proceeding with finalization", {
+                      serverChunkCount,
+                      expectedCount,
+                      percentage: `${((serverChunkCount / expectedCount) * 100).toFixed(1)}%`,
+                    });
+                    break;
+                  } else {
+                    const missingChunks = expectedCount - serverChunkCount;
+                    console.log(`Waiting for ${missingChunks} more chunks (${serverChunkCount}/${expectedCount}), attempt ${verificationAttempts + 1}/${maxVerificationAttempts}`);
+                    await new Promise((r) => setTimeout(r, minWaitTime));
+                  }
+                } else {
+                  // If verification endpoint fails, proceed anyway after first attempt
+                  console.warn("Chunk verification endpoint returned error, proceeding with finalization");
+                  break;
+                }
+              } catch (error) {
+                console.warn("Error verifying chunks:", error);
+                // If verification fails, proceed anyway after first attempt
+                if (verificationAttempts === 0) {
+                  // Try one more time
+                  await new Promise((r) => setTimeout(r, minWaitTime));
+                } else {
+                  console.warn("Chunk verification failed multiple times, proceeding with finalization");
+                  break;
+                }
+              }
+              verificationAttempts++;
             }
 
             // Finalize recording on server
@@ -850,28 +968,41 @@ export function useCallRecorder({
         };
 
         // Now stop the recorder
-        console.log("Stopping MediaRecorder");
+        console.log("Stopping MediaRecorder", {
+          state: mediaRecorder.state,
+          totalChunks: uploadPromisesRef.current.length,
+        });
         try {
           // Request any remaining data before stopping (important for iPad)
           // This ensures the final chunk is captured
           if (mediaRecorder.state === "recording") {
+            // Request final data chunk
             mediaRecorder.requestData();
+            console.log("Requested final data chunk");
             
-            // Small delay to allow requestData to process before stopping
-            // Use setTimeout without await since we're in a Promise executor
+            // Wait a bit for the final chunk to be emitted, then stop
+            // Use a shorter delay and ensure we actually stop
             setTimeout(() => {
               try {
-                if (mediaRecorder.state === "recording") {
-                  console.log("Stopping MediaRecorder after requestData delay");
+                if (mediaRecorder.state === "recording" || mediaRecorder.state === "inactive") {
+                  console.log("Stopping MediaRecorder after requestData", {
+                    state: mediaRecorder.state,
+                    totalChunksBeforeStop: uploadPromisesRef.current.length,
+                  });
                   mediaRecorder.stop();
+                } else {
+                  console.log("MediaRecorder already stopped", { state: mediaRecorder.state });
                 }
               } catch (stopError) {
                 console.error("Error stopping MediaRecorder after requestData:", stopError);
                 // Still resolve to prevent hanging
                 resolve();
               }
-            }, 150);
+            }, 200); // Increased delay slightly to ensure final chunk is processed
           } else {
+            console.log("MediaRecorder not in recording state, stopping directly", {
+              state: mediaRecorder.state,
+            });
             mediaRecorder.stop();
           }
         } catch (error) {

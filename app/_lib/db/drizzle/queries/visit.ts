@@ -524,6 +524,7 @@ export async function getVisitDetails(visitId: string) {
       priority: visit.priority,
       appointmentType: visit.appointmentType,
       clinicianId: visit.clinicianId,
+      twilioRoomName: visit.twilioRoomName,
     },
     patient: patientResult[0],
     notes: notesResult.map((note) => ({

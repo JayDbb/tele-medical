@@ -705,7 +705,7 @@ export function CallPageContent({
                     (isFinalizing ? "Finalizing..." :
                       isTranscribing ? "Transcribing..." :
                         isParsing ? "Parsing..." :
-                          isUploading ? "Uploading..." :
+                          isRecording ? "Stop Recording" :
                             "Stop Recording")}
                 </span>
               </Button>

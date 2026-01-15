@@ -101,7 +101,7 @@ EXAMPLES:
 - Transcript: "Syphilis screening was non-reactive" 
   → Extract: pointOfCare.syphilis: {"result": "", "reactivity": "non-reactive"}
 - Transcript: "Physical exam: Patient appears well. Heart regular rate and rhythm, no murmurs. Lungs clear bilaterally. Abdomen soft, non-tender. Skin clear." 
-  → Extract: examFindings: {"general": "Patient appears well", "cardiovascular": "Regular rate and rhythm, no murmurs", "lungs": "Clear bilaterally", "abdomen": "Soft, non-tender", "skin": "Clear", "heent": "", "neck": "", "musculoskeletal": "", "neurologic": ""}
+  → Extract: examFindings: {"general": "Patient appears well", "cardiovascular": "Regular rate and rhythm, no murmurs", "lungs": "Clear bilaterally", "abdomen": "Soft, non-tender", "skin": "Clear", "heent": "", "neck": "", "musculoskeletal": "", "neurologic": "", "psychological": ""}
 
 IMPORTANT INSTRUCTIONS:
 - Extract ALL information mentioned in the transcript, including medications, vaccines, family history, surgical history, past medical history, orders, and point of care tests
@@ -134,6 +134,7 @@ IMPORTANT INSTRUCTIONS:
   * Musculoskeletal: Range of motion, strength, deformities, gait, etc.
   * Neurologic: Mental status, cranial nerves, reflexes, sensation, coordination, gait, etc.
   * Skin: Rashes, lesions, color, temperature, turgor, etc.
+  * Psychological: Mood, affect, thought process, judgment, insight, behavior, etc.
 
 Schema:
 {
@@ -156,7 +157,8 @@ Schema:
       "abdomen": "",      // Abdominal examination, bowel sounds, etc.
       "musculoskeletal": "", // Musculoskeletal examination, range of motion, etc.
       "neurologic": "",   // Neurologic examination, reflexes, sensation, etc.
-      "skin": ""          // Skin examination, rashes, lesions, etc.
+      "skin": "",         // Skin examination, rashes, lesions, etc.
+      "psychological": "" // Psychological examination, mood, affect, thought process, etc.
     },
     "visionOd": "",        // Vision right eye
     "visionOs": "",        // Vision left eye
@@ -321,11 +323,12 @@ Schema:
   const fullPrompt = `${systemPrompt}\n\n${combinedUserPrompt}`;
 
   // Parse transcript and generate summary using DeepSeek LLM via Replicate
-  const deepSeekModel = "deepseek-ai/deepseek-v3.1";
+  const deepSeekModel = "meta/meta-llama-3-8b-instruct";
+  // const deepSeekModel = "deepseek-ai/deepseek-v3.1";
 
   const combinedInput = {
     prompt: fullPrompt,
-    max_tokens: 8096,
+    max_tokens: 3000,
     response_format: "json",
     temperature: 0.2,
   };

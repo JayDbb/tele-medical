@@ -5,7 +5,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Save, CheckCircle2, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, CheckCircle, AlertCircle, XCircle, Camera, X, Loader2, User, Clock, FileSignature } from "lucide-react";
+import { Save, CheckCircle2, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, CheckCircle, AlertCircle, XCircle, Camera, X, Loader2, User, Clock, FileSignature, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -57,6 +57,8 @@ interface NewVisitFormProps {
   onParseReadyRef?: React.MutableRefObject<((parsed: any) => void) | null>;
   onSaveReadyRef?: React.MutableRefObject<(() => Promise<void>) | null>;
   isInVideoCall?: boolean; // Flag to indicate if form is in video call context
+  visitAppointmentType?: string | null; // Appointment type for virtual visit detection
+  visitTwilioRoomName?: string | null; // Twilio room name for joining calls
 }
 
 
@@ -75,6 +77,8 @@ export function NewVisitForm({
   onParseReadyRef,
   onSaveReadyRef,
   isInVideoCall = false,
+  visitAppointmentType,
+  visitTwilioRoomName,
 }: NewVisitFormProps) {
   const router = useRouter();
   // Get sections based on role
@@ -744,6 +748,7 @@ export function NewVisitForm({
                   { key: "musculoskeletal", label: "Musculoskeletal" },
                   { key: "neurologic", label: "Neurologic" },
                   { key: "skin", label: "Skin" },
+                  { key: "psychological", label: "Psychological" },
                 ].map((category) => (
                   <div key={category.key} className="space-y-2">
                     <Label className="text-sm font-medium">{category.label}</Label>
@@ -1086,11 +1091,24 @@ export function NewVisitForm({
             {patientBasics.fullName} • DOB: {patientBasics.dob || "N/A"}
           </p>
         </div>
-        <OfflineSyncBadge
-          isOnline={isOnline}
-          pendingCount={pendingCount}
-          isSyncing={isSyncing}
-        />
+        <div className="flex items-center gap-2">
+          {/* Join Call button for virtual visits */}
+          {visitAppointmentType?.toLowerCase() === "virtual" && visitTwilioRoomName && existingVisitId && (
+            <Button 
+              onClick={() => router.push(`/visit/${existingVisitId}/call`)} 
+              variant="default"
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              <Video className="h-4 w-4 mr-2" />
+              Join Call
+            </Button>
+          )}
+          <OfflineSyncBadge
+            isOnline={isOnline}
+            pendingCount={pendingCount}
+            isSyncing={isSyncing}
+          />
+        </div>
       </div>
 
       {/* Layout: Stacked on tablet in video call, side-by-side otherwise */}

@@ -116,10 +116,15 @@ export async function POST(
       const files = await listFiles(CHUNKS_BUCKET, sessionPath);
 
       if (!files || files.length === 0) {
-        return NextResponse.json(
-          { error: "No chunks found for this session" },
-          { status: 404 }
-        );
+        console.warn("No chunks found for session", { sessionPath, recordingSessionId });
+        // Return success but with a message indicating no audio was recorded
+        return NextResponse.json({
+          success: true,
+          transcript: null,
+          parsedNote: null,
+          audioPath: null,
+          message: "No audio chunks were recorded. The recording may have been too short or no audio was captured.",
+        });
       }
 
       // Filter and sort chunk files
@@ -128,10 +133,15 @@ export async function POST(
         .sort((a, b) => a.name.localeCompare(b.name));
 
       if (chunkFiles.length === 0) {
-        return NextResponse.json(
-          { error: "No chunks found for this session" },
-          { status: 404 }
-        );
+        console.warn("No valid chunk files found for session", { sessionPath, recordingSessionId, files: files.map(f => f.name) });
+        // Return success but with a message indicating no valid chunks
+        return NextResponse.json({
+          success: true,
+          transcript: null,
+          parsedNote: null,
+          audioPath: null,
+          message: "No valid audio chunks were found. The recording may have been incomplete.",
+        });
       }
 
       // Download and assemble chunks into single buffer

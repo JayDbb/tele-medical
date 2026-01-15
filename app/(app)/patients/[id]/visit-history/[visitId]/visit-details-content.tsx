@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Edit, FileText, AudioWaveform, File, Clock, User, CheckCircle2, AlertCircle, FileSignature, Eye, Download, Image } from "lucide-react";
+import { ArrowLeft, Edit, FileText, AudioWaveform, File, Clock, User, CheckCircle2, AlertCircle, FileSignature, Eye, Download, Image, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ interface VisitDetailsContentProps {
     priority: string | null;
     appointmentType: string | null;
     clinicianId: string | null;
+    twilioRoomName: string | null;
   };
   currentUserId: string;
   patient: {
@@ -248,25 +249,25 @@ export function VisitDetailsContent({
   // Use a Map to track seen documents for better performance
   const uniqueDocuments = React.useMemo(() => {
     const seen = new Map<string, boolean>();
-    
+
     return documents.filter((doc) => {
       // Create unique keys for checking duplicates
       const idKey = `id:${doc.id}`;
       const storageKey = doc.storageUrl ? `storage:${doc.storageUrl}` : null;
       const fileKey = `file:${doc.filename}:${doc.size}`;
-      
+
       // Check if we've seen this document by any identifier
       if (seen.has(idKey) || (storageKey && seen.has(storageKey)) || seen.has(fileKey)) {
         return false;
       }
-      
+
       // Mark all identifiers as seen
       seen.set(idKey, true);
       if (storageKey) {
         seen.set(storageKey, true);
       }
       seen.set(fileKey, true);
-      
+
       return true;
     });
   }, [documents]);
@@ -298,7 +299,7 @@ export function VisitDetailsContent({
       if (!result.success || !result.signedUrl) {
         throw new Error(result.error || "Failed to get download URL");
       }
-      
+
       // Open in new tab for viewing/downloading
       window.open(result.signedUrl, "_blank");
       toast.success("Opening document...");
@@ -334,7 +335,7 @@ export function VisitDetailsContent({
   const formatFileSize = (size: string | number) => {
     const bytes = typeof size === "string" ? parseInt(size, 10) : size;
     if (isNaN(bytes)) return "Unknown size";
-    
+
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -358,6 +359,17 @@ export function VisitDetailsContent({
           </div>
         </div>
         <div className="flex gap-2">
+          {/* Join Call button for virtual visits */}
+          {visit.appointmentType?.toLowerCase() === "virtual" && visit.twilioRoomName && (
+            <Button
+              onClick={() => router.push(`/visit/${visitId}/call`)}
+              variant="default"
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              <Video className="h-4 w-4 mr-2" />
+              Join Call
+            </Button>
+          )}
           {canEdit && (
             <Button onClick={handleEdit} disabled={isMarkingInProgress}>
               <Edit className="h-4 w-4 mr-2" />
@@ -628,6 +640,7 @@ export function VisitDetailsContent({
                                           { key: "musculoskeletal", label: "Musculoskeletal" },
                                           { key: "neurologic", label: "Neurologic" },
                                           { key: "skin", label: "Skin" },
+                                          { key: "psychological", label: "Psychological" },
                                         ].map((category) => {
                                           const value = noteData.objective.examFindings?.[category.key as keyof typeof noteData.objective.examFindings];
                                           return value && value !== "" ? (
@@ -665,78 +678,78 @@ export function VisitDetailsContent({
                           (noteData.pointOfCare.hiv && noteData.pointOfCare.hiv !== "") ||
                           (noteData.pointOfCare.syphilis && (noteData.pointOfCare.syphilis.result || noteData.pointOfCare.syphilis.reactivity))
                         ) && (
-                          <Card>
-                            <CardHeader className="pb-2">
-                              <CardTitle className="text-base">Point of Care</CardTitle>
-                            </CardHeader>
-                            <CardContent className="pt-0 space-y-6">
-                              {/* Diabetes Subsection */}
-                              {noteData.pointOfCare.diabetes && Object.values(noteData.pointOfCare.diabetes).some((v: any) => v && v !== "") && (
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-semibold text-foreground border-b pb-1">Diabetes</h4>
-                                  <div className="grid gap-2 md:grid-cols-2 text-sm">
-                                    {noteData.pointOfCare.diabetes.fastingGlucose && (
-                                      <div><span className="font-medium">Fasting Glucose: </span>{noteData.pointOfCare.diabetes.fastingGlucose}</div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.randomGlucose && (
-                                      <div><span className="font-medium">Random Glucose: </span>{noteData.pointOfCare.diabetes.randomGlucose}</div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.hbA1cValue && (
-                                      <div>
-                                        <span className="font-medium">HbA1c: </span>
-                                        {noteData.pointOfCare.diabetes.hbA1cValue}
-                                        {noteData.pointOfCare.diabetes.hbA1cDate && <span className="text-muted-foreground"> ({noteData.pointOfCare.diabetes.hbA1cDate})</span>}
-                                      </div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.homeMonitoring && (
-                                      <div><span className="font-medium">Home Monitoring: </span>{noteData.pointOfCare.diabetes.homeMonitoring}</div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.averageReadings && (
-                                      <div><span className="font-medium">Average Readings: </span>{noteData.pointOfCare.diabetes.averageReadings}</div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.hypoglycemiaEpisodes && (
-                                      <div><span className="font-medium">Hypoglycemia Episodes: </span>{noteData.pointOfCare.diabetes.hypoglycemiaEpisodes}</div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.hyperglycemiaSymptoms && (
-                                      <div><span className="font-medium">Hyperglycemia Symptoms: </span>{noteData.pointOfCare.diabetes.hyperglycemiaSymptoms}</div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.footExam && (
-                                      <div><span className="font-medium">Foot Exam: </span>{noteData.pointOfCare.diabetes.footExam}</div>
-                                    )}
-                                    {noteData.pointOfCare.diabetes.eyeExamDue && (
-                                      <div><span className="font-medium">Eye Exam Due: </span>{noteData.pointOfCare.diabetes.eyeExamDue}</div>
-                                    )}
+                            <Card>
+                              <CardHeader className="pb-2">
+                                <CardTitle className="text-base">Point of Care</CardTitle>
+                              </CardHeader>
+                              <CardContent className="pt-0 space-y-6">
+                                {/* Diabetes Subsection */}
+                                {noteData.pointOfCare.diabetes && Object.values(noteData.pointOfCare.diabetes).some((v: any) => v && v !== "") && (
+                                  <div className="space-y-3">
+                                    <h4 className="text-sm font-semibold text-foreground border-b pb-1">Diabetes</h4>
+                                    <div className="grid gap-2 md:grid-cols-2 text-sm">
+                                      {noteData.pointOfCare.diabetes.fastingGlucose && (
+                                        <div><span className="font-medium">Fasting Glucose: </span>{noteData.pointOfCare.diabetes.fastingGlucose}</div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.randomGlucose && (
+                                        <div><span className="font-medium">Random Glucose: </span>{noteData.pointOfCare.diabetes.randomGlucose}</div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.hbA1cValue && (
+                                        <div>
+                                          <span className="font-medium">HbA1c: </span>
+                                          {noteData.pointOfCare.diabetes.hbA1cValue}
+                                          {noteData.pointOfCare.diabetes.hbA1cDate && <span className="text-muted-foreground"> ({noteData.pointOfCare.diabetes.hbA1cDate})</span>}
+                                        </div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.homeMonitoring && (
+                                        <div><span className="font-medium">Home Monitoring: </span>{noteData.pointOfCare.diabetes.homeMonitoring}</div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.averageReadings && (
+                                        <div><span className="font-medium">Average Readings: </span>{noteData.pointOfCare.diabetes.averageReadings}</div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.hypoglycemiaEpisodes && (
+                                        <div><span className="font-medium">Hypoglycemia Episodes: </span>{noteData.pointOfCare.diabetes.hypoglycemiaEpisodes}</div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.hyperglycemiaSymptoms && (
+                                        <div><span className="font-medium">Hyperglycemia Symptoms: </span>{noteData.pointOfCare.diabetes.hyperglycemiaSymptoms}</div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.footExam && (
+                                        <div><span className="font-medium">Foot Exam: </span>{noteData.pointOfCare.diabetes.footExam}</div>
+                                      )}
+                                      {noteData.pointOfCare.diabetes.eyeExamDue && (
+                                        <div><span className="font-medium">Eye Exam Due: </span>{noteData.pointOfCare.diabetes.eyeExamDue}</div>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
-                              )}
+                                )}
 
-                              {/* HIV Subsection */}
-                              {noteData.pointOfCare.hiv && noteData.pointOfCare.hiv !== "" && (
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-semibold text-foreground border-b pb-1">HIV</h4>
-                                  <div className="grid gap-2 md:grid-cols-2 text-sm">
-                                    <div><span className="font-medium">Result: </span>{noteData.pointOfCare.hiv}</div>
+                                {/* HIV Subsection */}
+                                {noteData.pointOfCare.hiv && noteData.pointOfCare.hiv !== "" && (
+                                  <div className="space-y-3">
+                                    <h4 className="text-sm font-semibold text-foreground border-b pb-1">HIV</h4>
+                                    <div className="grid gap-2 md:grid-cols-2 text-sm">
+                                      <div><span className="font-medium">Result: </span>{noteData.pointOfCare.hiv}</div>
+                                    </div>
                                   </div>
-                                </div>
-                              )}
+                                )}
 
-                              {/* Syphilis Subsection */}
-                              {noteData.pointOfCare.syphilis && (noteData.pointOfCare.syphilis.result || noteData.pointOfCare.syphilis.reactivity) && (
-                                <div className="space-y-3">
-                                  <h4 className="text-sm font-semibold text-foreground border-b pb-1">Syphilis</h4>
-                                  <div className="grid gap-2 md:grid-cols-2 text-sm">
-                                    {noteData.pointOfCare.syphilis.result && (
-                                      <div><span className="font-medium">Result: </span>{noteData.pointOfCare.syphilis.result}</div>
-                                    )}
-                                    {noteData.pointOfCare.syphilis.reactivity && (
-                                      <div><span className="font-medium">Reactivity: </span>{noteData.pointOfCare.syphilis.reactivity}</div>
-                                    )}
+                                {/* Syphilis Subsection */}
+                                {noteData.pointOfCare.syphilis && (noteData.pointOfCare.syphilis.result || noteData.pointOfCare.syphilis.reactivity) && (
+                                  <div className="space-y-3">
+                                    <h4 className="text-sm font-semibold text-foreground border-b pb-1">Syphilis</h4>
+                                    <div className="grid gap-2 md:grid-cols-2 text-sm">
+                                      {noteData.pointOfCare.syphilis.result && (
+                                        <div><span className="font-medium">Result: </span>{noteData.pointOfCare.syphilis.result}</div>
+                                      )}
+                                      {noteData.pointOfCare.syphilis.reactivity && (
+                                        <div><span className="font-medium">Reactivity: </span>{noteData.pointOfCare.syphilis.reactivity}</div>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        )}
+                                )}
+                              </CardContent>
+                            </Card>
+                          )}
 
                         {/* Medications */}
                         {noteData.medications && Array.isArray(noteData.medications) && noteData.medications.length > 0 && (
@@ -768,96 +781,96 @@ export function VisitDetailsContent({
                           (Array.isArray(noteData.assessmentPlan) && noteData.assessmentPlan.length > 0) ||
                           (typeof noteData.assessmentPlan === "object" && (noteData.assessmentPlan.assessment || noteData.assessmentPlan.plan))
                         ) && (
-                          <Card>
-                            <CardHeader className="pb-2">
-                              <CardTitle className="text-base">Assessment & Plan</CardTitle>
-                            </CardHeader>
-                            <CardContent className="pt-0 space-y-4 text-sm">
-                              {Array.isArray(noteData.assessmentPlan) ? (
-                                // New format: array of detailed assessment-plan entries
-                                noteData.assessmentPlan.map((item: any, index: number) => (
-                                  <div key={index} className="space-y-3 pb-4 border-b last:border-b-0 last:pb-0">
-                                    {item.assessment && (
+                            <Card>
+                              <CardHeader className="pb-2">
+                                <CardTitle className="text-base">Assessment & Plan</CardTitle>
+                              </CardHeader>
+                              <CardContent className="pt-0 space-y-4 text-sm">
+                                {Array.isArray(noteData.assessmentPlan) ? (
+                                  // New format: array of detailed assessment-plan entries
+                                  noteData.assessmentPlan.map((item: any, index: number) => (
+                                    <div key={index} className="space-y-3 pb-4 border-b last:border-b-0 last:pb-0">
+                                      {item.assessment && (
+                                        <div>
+                                          <span className="font-medium">Assessment: </span>
+                                          <div className="mt-1 whitespace-pre-wrap">{item.assessment}</div>
+                                        </div>
+                                      )}
+                                      {item.plan && (
+                                        <div>
+                                          <span className="font-medium">Plan: </span>
+                                          <div className="mt-1 whitespace-pre-wrap">{item.plan}</div>
+                                        </div>
+                                      )}
+                                      {item.medications && Array.isArray(item.medications) && item.medications.length > 0 && (
+                                        <div>
+                                          <span className="font-medium">Medications: </span>
+                                          <div className="mt-1 space-y-1">
+                                            {item.medications.map((med: any, medIndex: number) => (
+                                              <div key={medIndex} className="pl-2">
+                                                {med.brandName} {med.dosage && med.dosage} {med.frequency && med.frequency}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {item.orders && Array.isArray(item.orders) && item.orders.length > 0 ? (
+                                        <div>
+                                          <span className="font-medium">Orders: </span>
+                                          <div className="mt-1 space-y-1">
+                                            {item.orders.map((order: any, orderIndex: number) => (
+                                              <div key={orderIndex} className="pl-2">
+                                                {order.details || "None"}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div>
+                                          <span className="font-medium">Orders: </span>
+                                          <span className="text-muted-foreground">None</span>
+                                        </div>
+                                      )}
+                                      {item.followUp && (
+                                        <div>
+                                          <span className="font-medium">Follow-up: </span>
+                                          <div className="mt-1 whitespace-pre-wrap">{item.followUp}</div>
+                                        </div>
+                                      )}
+                                      {item.education && (
+                                        <div>
+                                          <span className="font-medium">Education: </span>
+                                          <div className="mt-1 whitespace-pre-wrap">{item.education}</div>
+                                        </div>
+                                      )}
+                                      {item.coordination && (
+                                        <div>
+                                          <span className="font-medium">Coordination: </span>
+                                          <div className="mt-1 whitespace-pre-wrap">{item.coordination}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))
+                                ) : (
+                                  // Backward compatibility: old format (object with assessment/plan)
+                                  <>
+                                    {noteData.assessmentPlan.assessment && (
                                       <div>
                                         <span className="font-medium">Assessment: </span>
-                                        <div className="mt-1 whitespace-pre-wrap">{item.assessment}</div>
+                                        <div className="mt-1 whitespace-pre-wrap">{noteData.assessmentPlan.assessment}</div>
                                       </div>
                                     )}
-                                    {item.plan && (
+                                    {noteData.assessmentPlan.plan && (
                                       <div>
                                         <span className="font-medium">Plan: </span>
-                                        <div className="mt-1 whitespace-pre-wrap">{item.plan}</div>
+                                        <div className="mt-1 whitespace-pre-wrap">{noteData.assessmentPlan.plan}</div>
                                       </div>
                                     )}
-                                    {item.medications && Array.isArray(item.medications) && item.medications.length > 0 && (
-                                      <div>
-                                        <span className="font-medium">Medications: </span>
-                                        <div className="mt-1 space-y-1">
-                                          {item.medications.map((med: any, medIndex: number) => (
-                                            <div key={medIndex} className="pl-2">
-                                              {med.brandName} {med.dosage && med.dosage} {med.frequency && med.frequency}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                    {item.orders && Array.isArray(item.orders) && item.orders.length > 0 ? (
-                                      <div>
-                                        <span className="font-medium">Orders: </span>
-                                        <div className="mt-1 space-y-1">
-                                          {item.orders.map((order: any, orderIndex: number) => (
-                                            <div key={orderIndex} className="pl-2">
-                                              {order.details || "None"}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div>
-                                        <span className="font-medium">Orders: </span>
-                                        <span className="text-muted-foreground">None</span>
-                                      </div>
-                                    )}
-                                    {item.followUp && (
-                                      <div>
-                                        <span className="font-medium">Follow-up: </span>
-                                        <div className="mt-1 whitespace-pre-wrap">{item.followUp}</div>
-                                      </div>
-                                    )}
-                                    {item.education && (
-                                      <div>
-                                        <span className="font-medium">Education: </span>
-                                        <div className="mt-1 whitespace-pre-wrap">{item.education}</div>
-                                      </div>
-                                    )}
-                                    {item.coordination && (
-                                      <div>
-                                        <span className="font-medium">Coordination: </span>
-                                        <div className="mt-1 whitespace-pre-wrap">{item.coordination}</div>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))
-                              ) : (
-                                // Backward compatibility: old format (object with assessment/plan)
-                                <>
-                                  {noteData.assessmentPlan.assessment && (
-                                    <div>
-                                      <span className="font-medium">Assessment: </span>
-                                      <div className="mt-1 whitespace-pre-wrap">{noteData.assessmentPlan.assessment}</div>
-                                    </div>
-                                  )}
-                                  {noteData.assessmentPlan.plan && (
-                                    <div>
-                                      <span className="font-medium">Plan: </span>
-                                      <div className="mt-1 whitespace-pre-wrap">{noteData.assessmentPlan.plan}</div>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </CardContent>
-                          </Card>
-                        )}
+                                  </>
+                                )}
+                              </CardContent>
+                            </Card>
+                          )}
 
                         {/* Vaccines */}
                         {noteData.vaccines && Array.isArray(noteData.vaccines) && noteData.vaccines.length > 0 && (

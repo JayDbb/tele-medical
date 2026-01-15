@@ -33,6 +33,7 @@ export const visitNoteSchema = z.object({
           musculoskeletal: z.string().default(""),
           neurologic: z.string().default(""),
           skin: z.string().default(""),
+          psychological: z.string().default(""),
         })
         .default({
           general: "",
@@ -44,6 +45,7 @@ export const visitNoteSchema = z.object({
           musculoskeletal: "",
           neurologic: "",
           skin: "",
+          psychological: "",
         }),
       visionOd: z.string().default(""),
       visionOs: z.string().default(""),
@@ -71,6 +73,7 @@ export const visitNoteSchema = z.object({
         musculoskeletal: "",
         neurologic: "",
         skin: "",
+        psychological: "",
       },
       visionOd: "",
       visionOs: "",
@@ -370,6 +373,7 @@ function migrateVisitNoteData(data: any): any {
           musculoskeletal: examFindings?.musculoskeletal || "",
           neurologic: examFindings?.neurologic || "",
           skin: examFindings?.skin || "",
+          psychological: examFindings?.psychological || "",
         },
       };
     }

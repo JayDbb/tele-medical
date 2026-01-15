@@ -37,10 +37,16 @@ export default async function NewVisitPage({
 
   // If visitId is provided, load existing visit data for editing
   let existingVisitData = null;
+  let visitAppointmentType: string | null = null;
+  let visitTwilioRoomName: string | null = null;
   if (visitId) {
     const visitDetails = await getVisitDetails(visitId);
-    if (visitDetails && visitDetails.notes[0]) {
-      existingVisitData = visitDetails.notes[0].note;
+    if (visitDetails) {
+      if (visitDetails.notes[0]) {
+        existingVisitData = visitDetails.notes[0].note;
+      }
+      visitAppointmentType = visitDetails.visit.appointmentType;
+      visitTwilioRoomName = visitDetails.visit.twilioRoomName;
     }
   }
 
@@ -52,6 +58,8 @@ export default async function NewVisitPage({
       userRole={user.role}
       existingVisitId={visitId || undefined}
       existingVisitData={existingVisitData || undefined}
+      visitAppointmentType={visitAppointmentType ?? undefined}
+      visitTwilioRoomName={visitTwilioRoomName ?? undefined}
     />
   );
 }

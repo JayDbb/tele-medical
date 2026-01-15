@@ -66,6 +66,7 @@ export function mergeVisitNote(existing: VisitNote, aiParsed: Partial<VisitNote>
           musculoskeletal: mergeValue(existingExamFindings.musculoskeletal, aiParsed.objective.examFindings.musculoskeletal),
           neurologic: mergeValue(existingExamFindings.neurologic, aiParsed.objective.examFindings.neurologic),
           skin: mergeValue(existingExamFindings.skin, aiParsed.objective.examFindings.skin),
+          psychological: mergeValue(existingExamFindings.psychological, aiParsed.objective.examFindings.psychological),
         };
       } else if (typeof aiParsed.objective.examFindings === "string") {
         // Backward compatibility: if AI returns a string, keep existing structured format or convert

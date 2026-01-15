@@ -224,10 +224,10 @@ export function OpenNotesContent({ visits }: OpenNotesContentProps) {
                   )}
 
                   <Link href={`/patients/${visit.patientId}/new-visit?visitId=${visit.id}`}>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                      <FileText className="h-4 w-4" />
-                      <span>Click to continue note</span>
-                    </div>
+                    <Button className="w-full" variant="default">
+                      <FileText className="h-4 w-4 mr-2" />
+                      Continue Note
+                    </Button>
                   </Link>
                 </CardContent>
               </Card>

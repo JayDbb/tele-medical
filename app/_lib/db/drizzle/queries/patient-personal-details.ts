@@ -84,6 +84,7 @@ export async function getPatientPersonalDetails(patientId: string) {
  * @returns Created patient data
  */
 export async function createPatient(data: {
+  id?: string; // Optional: if provided, use this ID instead of auto-generating
   fullName: string;
   preferredName?: string | null;
   dob?: string | null;
@@ -101,6 +102,7 @@ export async function createPatient(data: {
   emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string | null;
   primaryCareProvider?: string | null;
+  consentSignatureUrl?: string | null;
 }) {
   // Combine street address, city, state, zip into address field
   const addressParts: string[] = [];
@@ -133,6 +135,7 @@ export async function createPatient(data: {
   const result = await db
     .insert(patients)
     .values({
+      ...(data.id && { id: data.id }), // Only include id if provided
       fullName: data.fullName,
       dob: data.dob || null,
       sexAtBirth: data.sexAtBirth || null,
@@ -147,6 +150,7 @@ export async function createPatient(data: {
         Object.keys(additionalData).length > 0 ? additionalData : null,
       // Store emergency contact in emergency_contact JSONB field
       emergencyContact: emergencyContact,
+      consentSignatureUrl: data.consentSignatureUrl || null,
     })
     .returning();
 

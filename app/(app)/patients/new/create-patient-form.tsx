@@ -29,9 +29,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { createPatientAction, updatePatientAssignmentAction } from "@/app/_actions/patients";
+import { createPatientAction, updatePatientAssignmentAction, updatePatientConsentSignatureAction } from "@/app/_actions/patients";
 import { createVisitDraftAction, updateVisitWaitingRoomAction } from "@/app/_actions/visits";
 import { cn } from "@/app/_lib/utils/cn";
+import { ConsentFormDialog } from "@/app/_components/patient-chart/consent-form-dialog";
 
 const createPatientSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
@@ -78,7 +79,9 @@ export function CreatePatientForm() {
   const router = useRouter();
   const [isSaving, setIsSaving] = React.useState(false);
   const [showPostCreateModal, setShowPostCreateModal] = React.useState(false);
+  const [showConsentDialog, setShowConsentDialog] = React.useState(false);
   const [createdPatientId, setCreatedPatientId] = React.useState<string | null>(null);
+  const [pendingPatientData, setPendingPatientData] = React.useState<CreatePatientFormData | null>(null);
   const [isHandlingAction, setIsHandlingAction] = React.useState(false);
   const [showDuplicateModal, setShowDuplicateModal] = React.useState(false);
   const [existingPatients, setExistingPatients] = React.useState<ExistingPatient[]>([]);
@@ -112,48 +115,41 @@ export function CreatePatientForm() {
     try {
       setIsSaving(true);
 
-      // Determine preferred communication method
+      // Check for duplicates first (before showing consent)
       const commMethods: string[] = [];
       if (data.smsNotifications) commMethods.push("SMS");
       if (data.emailNotifications) commMethods.push("Email");
       const preferredCommMethod = commMethods.length > 0 ? commMethods.join(", ") : null;
 
-      const result = await createPatientAction({
-        firstName: data.firstName,
-        lastName: data.lastName,
-        preferredName: data.preferredName || undefined,
-        dob: data.dob || undefined,
-        sexAtBirth: data.sexAtBirth || undefined,
-        genderIdentity: data.genderIdentity || undefined,
-        phone: data.phone,
-        email: data.email || undefined,
-        streetAddress: data.streetAddress || undefined,
-        city: data.city || undefined,
-        state: data.state || undefined,
-        zip: data.zip || undefined,
-        primaryLanguage: data.primaryLanguage || undefined,
-        preferredCommMethod: preferredCommMethod || undefined,
-        emergencyContactName: data.emergencyContactName || undefined,
-        emergencyContactRelationship: data.emergencyContactRelationship || undefined,
-        emergencyContactPhone: data.emergencyContactPhone || undefined,
-        primaryCareProvider: data.primaryCareProvider || undefined,
+      // Check for existing patients with the same phone or email
+      const checkResponse = await fetch("/api/patients/check-duplicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: data.phone,
+          email: data.email || undefined,
+        }),
       });
 
-      if (result.success) {
-        toast.success("Patient created successfully");
-        setCreatedPatientId(result.patientId || null);
-        setShowPostCreateModal(true);
-      } else if (result.error === "DUPLICATE" && result.existingPatients) {
-        setExistingPatients(result.existingPatients);
-        setShowDuplicateModal(true);
-        toast.error("A patient with this phone number or email already exists");
+      if (checkResponse.ok) {
+        const checkResult = await checkResponse.json();
+        if (checkResult.existingPatients && checkResult.existingPatients.length > 0) {
+          setExistingPatients(checkResult.existingPatients);
+          setShowDuplicateModal(true);
+          toast.error("A patient with this phone number or email already exists");
+          return;
+        }
       }
+
+      // Store form data and show consent dialog
+      setPendingPatientData(data);
+      setShowConsentDialog(true);
     } catch (error) {
-      console.error("Error creating patient:", error);
+      console.error("Error checking for duplicates:", error);
       toast.error(
         error instanceof Error
           ? error.message
-          : "Failed to create patient"
+          : "Failed to validate patient information"
       );
     } finally {
       setIsSaving(false);
@@ -483,6 +479,102 @@ export function CreatePatientForm() {
         </Button>
       </div>
 
+      {/* Consent Form Dialog */}
+      <ConsentFormDialog
+        open={showConsentDialog}
+        onOpenChange={(open) => {
+          setShowConsentDialog(open);
+          // If dialog is closed without submitting, clear pending data
+          if (!open && !createdPatientId) {
+            setPendingPatientData(null);
+          }
+        }}
+        patientName={pendingPatientData ? `${pendingPatientData.firstName} ${pendingPatientData.lastName}`.trim() : ""}
+        onConsentComplete={async (signatureDataUrl, witnessName, witnessSignatureDataUrl) => {
+          if (!pendingPatientData) return;
+
+          try {
+            setIsSaving(true);
+
+            // Generate a UUID for the patient (we'll use this for both upload and creation)
+            const patientId = crypto.randomUUID();
+
+            // First, upload signature to Supabase Storage using the generated patient ID
+            const formData = new FormData();
+            formData.append("signature", signatureDataUrl);
+            formData.append("patientId", patientId);
+            if (witnessSignatureDataUrl) {
+              formData.append("witnessSignature", witnessSignatureDataUrl);
+            }
+
+            const uploadResponse = await fetch("/api/upload/signature", {
+              method: "POST",
+              body: formData,
+            });
+
+            if (!uploadResponse.ok) {
+              const error = await uploadResponse.json();
+              throw new Error(error.error || "Failed to upload signature");
+            }
+
+            const uploadData = await uploadResponse.json();
+
+            // Determine preferred communication method
+            const commMethods: string[] = [];
+            if (pendingPatientData.smsNotifications) commMethods.push("SMS");
+            if (pendingPatientData.emailNotifications) commMethods.push("Email");
+            const preferredCommMethod = commMethods.length > 0 ? commMethods.join(", ") : null;
+
+            // Now create the patient with the signature URL and the pre-generated ID
+            const result = await createPatientAction({
+              firstName: pendingPatientData.firstName,
+              lastName: pendingPatientData.lastName,
+              preferredName: pendingPatientData.preferredName || undefined,
+              dob: pendingPatientData.dob || undefined,
+              sexAtBirth: pendingPatientData.sexAtBirth || undefined,
+              genderIdentity: pendingPatientData.genderIdentity || undefined,
+              phone: pendingPatientData.phone,
+              email: pendingPatientData.email || undefined,
+              streetAddress: pendingPatientData.streetAddress || undefined,
+              city: pendingPatientData.city || undefined,
+              state: pendingPatientData.state || undefined,
+              zip: pendingPatientData.zip || undefined,
+              primaryLanguage: pendingPatientData.primaryLanguage || undefined,
+              preferredCommMethod: preferredCommMethod || undefined,
+              emergencyContactName: pendingPatientData.emergencyContactName || undefined,
+              emergencyContactRelationship: pendingPatientData.emergencyContactRelationship || undefined,
+              emergencyContactPhone: pendingPatientData.emergencyContactPhone || undefined,
+              primaryCareProvider: pendingPatientData.primaryCareProvider || undefined,
+              consentSignatureUrl: uploadData.signatureUrl,
+            });
+
+            if (result.success) {
+              toast.success("Patient created successfully");
+              setCreatedPatientId(result.patientId || null);
+              setPendingPatientData(null);
+
+              // Close consent dialog and show post-create modal
+              setShowConsentDialog(false);
+              setShowPostCreateModal(true);
+            } else if (result.error === "DUPLICATE" && result.existingPatients) {
+              setExistingPatients(result.existingPatients);
+              setShowDuplicateModal(true);
+              toast.error("A patient with this phone number or email already exists");
+            }
+          } catch (error) {
+            console.error("Error creating patient with consent:", error);
+            toast.error(
+              error instanceof Error
+                ? error.message
+                : "Failed to create patient"
+            );
+            throw error;
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+      />
+
       {/* Post-Create Modal */}
       <Dialog open={showPostCreateModal} onOpenChange={setShowPostCreateModal}>
         <DialogContent>
@@ -628,7 +720,7 @@ export function CreatePatientForm() {
                           <div className="flex items-center gap-2">
                             <Calendar className="h-4 w-4" />
                             <span>
-                              {patient.dob instanceof Date 
+                              {patient.dob instanceof Date
                                 ? patient.dob.toLocaleDateString()
                                 : new Date(patient.dob).toLocaleDateString()}
                             </span>

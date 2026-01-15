@@ -54,6 +54,7 @@ export const patients = pgTable("patients", {
   surgicalHistory: jsonb("surgical_history"),
   emergencyContact: jsonb("emergency_contact"),
   isAssigned: boolean("is_assigned"),
+  consentSignatureUrl: text("consent_signature_url"),
 });
 
 /**

@@ -10,6 +10,7 @@ import { patients } from "@/app/_lib/db/drizzle/schema";
 import { eq } from "drizzle-orm";
 
 export interface CreatePatientPayload {
+  patientId?: string; // Optional: if provided, use this ID for the patient
   firstName: string;
   lastName: string;
   preferredName?: string;
@@ -28,6 +29,7 @@ export interface CreatePatientPayload {
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
   primaryCareProvider?: string;
+  consentSignatureUrl?: string;
 }
 
 export async function createPatientAction(payload: CreatePatientPayload) {
@@ -87,6 +89,7 @@ export async function createPatientAction(payload: CreatePatientPayload) {
         payload.emergencyContactRelationship || null,
       emergencyContactPhone: payload.emergencyContactPhone || null,
       primaryCareProvider: payload.primaryCareProvider || null,
+      consentSignatureUrl: payload.consentSignatureUrl || null,
     });
 
     // Revalidate the patients list page
@@ -152,6 +155,47 @@ export async function updatePatientAssignmentAction(
       error instanceof Error
         ? error.message
         : "Failed to update patient assignment"
+    );
+  }
+}
+
+/**
+ * Update patient consent signature URL
+ */
+export async function updatePatientConsentSignatureAction(
+  patientId: string,
+  consentSignatureUrl: string
+) {
+  const session = await getServerSession();
+
+  if (!session) {
+    redirect("/sign-in");
+  }
+
+  // Allow doctors and nurses only
+  if (session.role !== "doctor" && session.role !== "nurse") {
+    throw new Error(
+      "Unauthorized: Only doctors and nurses can update patient consent signature"
+    );
+  }
+
+  try {
+    await db
+      .update(patients)
+      .set({ consentSignatureUrl, updatedAt: new Date() })
+      .where(eq(patients.id, patientId));
+
+    // Revalidate the patients list page
+    revalidatePath("/patients");
+    revalidatePath(`/patients/${patientId}`);
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating patient consent signature:", error);
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Failed to update patient consent signature"
     );
   }
 }

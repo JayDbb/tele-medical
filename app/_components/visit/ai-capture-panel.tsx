@@ -119,7 +119,7 @@ export function AICapturePanel({
             let processedBlob: Blob = audioBlob;
             let fileExtension = "webm";
             let mimeType = audioBlob.type || "audio/webm";
-            
+
             try {
                 processedBlob = await _convertToMP3Internal(audioBlob);
                 fileExtension = "mp3";
@@ -176,13 +176,13 @@ export function AICapturePanel({
             if (!audioPath) {
                 const { saveDraft } = await import("@/app/_lib/offline/draft");
                 const { getOfflineDB } = await import("@/app/_lib/offline/db");
-                
+
                 const db = getOfflineDB();
                 const draft = await db.draftVisits
                     .where("patientId")
                     .equals(patientId)
                     .first();
-                
+
                 if (draft) {
                     await db.draftVisits.update(draft.draftId, {
                         pendingTranscription: JSON.stringify({
@@ -192,7 +192,7 @@ export function AICapturePanel({
                         }),
                     });
                 }
-                
+
                 toast.warning("Connection lost. Audio saved locally. Transcription will resume when online.");
                 setState("idle");
                 setProgress(0);
@@ -214,13 +214,13 @@ export function AICapturePanel({
                     // Transcription failed, queue for retry
                     const { saveDraft } = await import("@/app/_lib/offline/draft");
                     const { getOfflineDB } = await import("@/app/_lib/offline/db");
-                    
+
                     const db = getOfflineDB();
                     const draft = await db.draftVisits
                         .where("patientId")
                         .equals(patientId)
                         .first();
-                    
+
                     if (draft) {
                         await db.draftVisits.update(draft.draftId, {
                             pendingTranscription: JSON.stringify({
@@ -230,7 +230,7 @@ export function AICapturePanel({
                             }),
                         });
                     }
-                    
+
                     throw new Error("Transcription failed, will retry when connection is restored");
                 }
 
@@ -258,13 +258,13 @@ export function AICapturePanel({
                         // Parsing failed, queue for retry
                         const { saveDraft } = await import("@/app/_lib/offline/draft");
                         const { getOfflineDB } = await import("@/app/_lib/offline/db");
-                        
+
                         const db = getOfflineDB();
                         const draft = await db.draftVisits
                             .where("patientId")
                             .equals(patientId)
                             .first();
-                        
+
                         if (draft) {
                             await db.draftVisits.update(draft.draftId, {
                                 pendingParsing: JSON.stringify({
@@ -274,7 +274,7 @@ export function AICapturePanel({
                                 }),
                             });
                         }
-                        
+
                         throw new Error("Parsing failed, will retry when connection is restored");
                     }
 
@@ -309,14 +309,14 @@ export function AICapturePanel({
         } catch (error) {
             console.error("Error processing audio:", error);
             const errorMessage = error instanceof Error ? error.message : "Processing failed";
-            
+
             // If it's a network error, we've already saved locally
             if (errorMessage.includes("retry") || errorMessage.includes("offline")) {
                 toast.warning(errorMessage);
             } else {
                 toast.error(errorMessage);
             }
-            
+
             setState("idle");
             setProgress(0);
         }

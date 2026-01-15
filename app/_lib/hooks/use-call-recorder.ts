@@ -396,8 +396,8 @@ export function useCallRecorder({
         setState((prev) => ({
           ...prev,
           isUploading: pendingUploads > 0,
-          statusMessage:
-            pendingUploads > 0 ? "Uploading chunks..." : "Recording...",
+          // Don't show "Uploading chunks..." when recording - keep "Recording..." message
+          statusMessage: prev.isRecording ? "Recording..." : (pendingUploads > 0 ? "Uploading chunks..." : null),
         }));
       };
       const decrementUploads = () => {
@@ -405,8 +405,8 @@ export function useCallRecorder({
         setState((prev) => ({
           ...prev,
           isUploading: pendingUploads > 0,
-          statusMessage:
-            pendingUploads > 0 ? "Uploading chunks..." : "Recording...",
+          // Don't show "Uploading chunks..." when recording - keep "Recording..." message
+          statusMessage: prev.isRecording ? "Recording..." : (pendingUploads > 0 ? "Uploading chunks..." : null),
         }));
       };
 
@@ -606,12 +606,16 @@ export function useCallRecorder({
         return;
       }
 
-      // Only set finalizing state AFTER we've confirmed it's an explicit stop
-      setState((prev) => ({
-        ...prev,
+      // Set recording to false immediately and start finalizing
+      setState({
+        isRecording: false, // Stop showing "Recording..." immediately
+        isUploading: false, // Clear uploading state
+        isTranscribing: false,
+        isParsing: false,
         isFinalizing: true,
+        recordingSessionId: state.recordingSessionId,
         statusMessage: "Finalizing recording...",
-      }));
+      });
 
       return new Promise<void>((resolve) => {
         // REPLACE the onstop handler (the guard handler will have already checked the flag)
@@ -619,9 +623,11 @@ export function useCallRecorder({
         mediaRecorder.onstop = async () => {
           console.log("onstop handler in stopRecording called");
           try {
-            // Wait for any pending uploads to complete
+            // Wait for any pending uploads to complete (but don't show uploading status)
             setState((prev) => ({
               ...prev,
+              isRecording: false, // Ensure recording is false
+              isUploading: false, // Don't show uploading status during finalization
               statusMessage: "Waiting for uploads to complete...",
             }));
 
@@ -631,6 +637,8 @@ export function useCallRecorder({
             // Finalize recording on server
             setState((prev) => ({
               ...prev,
+              isRecording: false,
+              isUploading: false,
               statusMessage: "Transcribing audio...",
               isTranscribing: true,
             }));
@@ -745,14 +753,18 @@ export function useCallRecorder({
             if (data.parsedNote) {
               setState((prev) => ({
                 ...prev,
+                isRecording: false,
+                isUploading: false,
+                isTranscribing: false,
                 statusMessage: "Parsing transcript...",
                 isParsing: true,
               }));
 
-              // Small delay to show parsing state
-              await new Promise((r) => setTimeout(r, 500));
+              // Small delay to show parsing state before clearing
+              await new Promise((r) => setTimeout(r, 800));
             }
 
+            // Clear all states after processing completes
             setState({
               isRecording: false,
               isUploading: false,
@@ -984,7 +996,7 @@ export function useCallRecorder({
   // Get current status message
   const getStatusMessage = () => {
     if (state.statusMessage) return state.statusMessage;
-    if (state.isRecording) return "Recording...";
+    if (state.isRecording) return "Recording..."; // Always show "Recording..." when recording, even if uploading chunks
     if (state.isUploading) return "Uploading chunks...";
     if (state.isFinalizing) return "Finalizing recording...";
     if (state.isTranscribing) return "Transcribing audio...";

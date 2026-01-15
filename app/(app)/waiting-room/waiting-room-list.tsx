@@ -12,8 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getPatientOpenVisitAction, assignVisitToMeAction } from "@/app/_actions/visits";
 import { toast } from "sonner";
-import { Search, Clock, ArrowUpDown, Video, Copy, Check, QrCode } from "lucide-react";
+import { Search, Clock, ArrowUpDown, Video, Copy, Check, QrCode, RefreshCw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { useWaitingRoomRealtime } from "@/app/_lib/hooks/use-waiting-room-realtime";
 
 interface VisitInfo {
   id: string;
@@ -34,13 +35,13 @@ interface Patient {
 }
 
 interface WaitingRoomListProps {
-  patients: Patient[];
+  patients: Patient[]; // Initial patients from server
 }
 
 type SortField = "name" | "waitTime" | "priority" | "appointmentType";
 type SortDirection = "asc" | "desc";
 
-export function WaitingRoomList({ patients }: WaitingRoomListProps) {
+export function WaitingRoomList({ patients: initialPatients }: WaitingRoomListProps) {
   const router = useRouter();
   const [loadingPatientId, setLoadingPatientId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -48,6 +49,29 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const [virtualVisitData, setVirtualVisitData] = useState<Record<string, { joinUrl: string; visitId: string }>>({});
+
+  // Use polling hook to get live updates
+  const { patients, isConnected, error: realtimeError, refresh } = useWaitingRoomRealtime({
+    initialPatients,
+    onError: (error) => {
+      // Only log errors, don't spam console
+      // Errors are handled gracefully - the UI will show initial data
+      if (process.env.NODE_ENV === "development") {
+        console.warn("Polling error:", error.message);
+      }
+    },
+  });
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleAssignToMe = async (patientId: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -63,25 +87,11 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
         // Assign the visit to the current user
         const assignResult = await assignVisitToMeAction(result.visit.id);
 
-        // If virtual appointment, store join URL and don't navigate
-        if (assignResult.isVirtual && assignResult.joinUrl) {
-          setVirtualVisitData(prev => ({
-            ...prev,
-            [patientId]: {
-              joinUrl: assignResult.joinUrl!,
-              visitId: result.visit!.id,
-            },
-          }));
-          toast.success("Visit assigned. Join link generated.");
-          // Refresh the page to get updated visit data with patientJoinToken
-          router.refresh();
-        } else {
-          // Navigate to the open visit for non-virtual
-          router.push(`/patients/${patientId}/new-visit?visitId=${result.visit.id}`);
-        }
+        // Navigate to the new-visit page for this visit
+        router.push(`/patients/${patientId}/new-visit?visitId=${result.visit.id}`);
       } else {
-        // No open visit, navigate to patient page
-        router.push(`/patients/${patientId}`);
+        // No open visit, navigate to new visit page
+        router.push(`/patients/${patientId}/new-visit`);
       }
     } catch (error) {
       console.error("Error assigning visit:", error);
@@ -234,8 +244,19 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
-      {/* Sort Controls */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
+      {/* Refresh Button and Sort Controls */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="w-fit"
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+          {isRefreshing ? "Refreshing..." : "Refresh"}
+        </Button>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
         <div className="flex items-center gap-2">
           <Select value={sortField} onValueChange={(value) => handleSortChange(value as SortField)}>
             <SelectTrigger className="w-[180px]">
@@ -257,6 +278,7 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
             <ArrowUpDown className="h-4 w-4" />
           </Button>
         </div>
+        </div>
       </div>
 
       {/* Patient Cards */}
@@ -267,7 +289,10 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
           const appointmentBadge = getAppointmentTypeBadge(patient.visit?.appointmentType ?? null);
 
           return (
-            <Card key={patient.id} className="w-full hover:shadow-md transition-shadow">
+            <Card 
+              key={patient.id} 
+              className="w-full hover:shadow-md transition-shadow"
+            >
               <CardHeader>
                 <CardTitle className="text-lg font-semibold">
                   {patient.fullName}
@@ -309,16 +334,18 @@ export function WaitingRoomList({ patients }: WaitingRoomListProps) {
                   (patient.visit?.appointmentType?.toLowerCase() === "virtual" &&
                     patient.visit?.status === "In Progress" &&
                     patient.visit?.patientJoinToken)) ? (
-                  <VirtualAppointmentActions
-                    patientId={patient.id}
-                    visitId={virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}
-                    joinUrl={
-                      typeof window !== 'undefined'
-                        ? `${window.location.origin}/visit/${virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}/call`
-                        : ""
-                    }
-                    onJoin={() => router.push(`/visit/${virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}/call`)}
-                  />
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <VirtualAppointmentActions
+                      patientId={patient.id}
+                      visitId={virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}
+                      joinUrl={
+                        typeof window !== 'undefined'
+                          ? `${window.location.origin}/visit/${virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}/call`
+                          : ""
+                      }
+                      onJoin={() => router.push(`/visit/${virtualVisitData[patient.id]?.visitId || patient.visit?.id || ""}/call`)}
+                    />
+                  </div>
                 ) : (
                   <Button
                     onClick={(e) => handleAssignToMe(patient.id, e)}

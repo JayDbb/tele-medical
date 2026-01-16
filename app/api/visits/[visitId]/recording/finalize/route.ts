@@ -14,8 +14,12 @@ import {
 import type { VisitNote } from "@/app/_lib/visit-note/schema";
 
 export const runtime = "nodejs";
+export const maxDuration = 300; // 5 minutes for longer processing
 
 const CHUNKS_BUCKET = "telehealth_audio";
+// Supabase Free plan has 50MB file size limit
+// Pro plan can go up to 500GB, but we'll check and warn
+const SUPABASE_FREE_PLAN_LIMIT = 50 * 1024 * 1024; // 50MB
 
 /**
  * Cleanup helper: Delete all chunks for a session from Supabase Storage
@@ -147,51 +151,69 @@ export async function POST(
         hasGaps: chunkIndices.length > 0 && chunkIndices[chunkIndices.length - 1] - chunkIndices[0] + 1 !== chunkIndices.length,
       });
       
-      // CRITICAL: Validate we have all expected chunks before proceeding
-      if (expectedChunkCount && chunkFiles.length < expectedChunkCount) {
+      // Validate we have chunks - be lenient with expected count since it's an estimate
+      // The actual chunk count depends on timeslice (2 seconds) and final partial chunks
+      if (expectedChunkCount && chunkFiles.length > 0) {
+        // Allow for some variance - expected count is an estimate based on duration
+        // With 2-second timeslices, actual count should be roughly duration/2
+        // But we should have at least some chunks and not be missing too many
+        const minExpectedChunks = Math.floor(expectedChunkCount * 0.7); // Allow 30% variance
         const missing = expectedChunkCount - chunkFiles.length;
-        console.warn("Missing chunks detected - refusing to finalize", {
-          expectedChunkCount,
-          foundChunks: chunkFiles.length,
-          missing,
-          chunkIndices: chunkIndices,
-        });
         
-        // Wait a bit and retry listing (eventual consistency)
-        await new Promise((r) => setTimeout(r, 3000));
-        const retryFiles = await listFiles(CHUNKS_BUCKET, sessionPath);
-        const retryChunkFiles = retryFiles
-          ?.filter((f) => f.name.startsWith("chunk-"))
-          .sort((a, b) => a.name.localeCompare(b.name)) || [];
-        
-        if (retryChunkFiles.length < expectedChunkCount) {
-          return NextResponse.json(
-            {
-              error: `Missing chunks: expected ${expectedChunkCount}, found ${retryChunkFiles.length}. Please wait and retry.`,
-              expectedChunkCount,
-              foundChunks: retryChunkFiles.length,
-              missing: expectedChunkCount - retryChunkFiles.length,
-            },
-            { status: 400 }
-          );
+        if (chunkFiles.length < minExpectedChunks) {
+          console.warn("Too many chunks missing - refusing to finalize", {
+            expectedChunkCount,
+            foundChunks: chunkFiles.length,
+            minExpectedChunks,
+            missing,
+            chunkIndices: chunkIndices,
+          });
+          
+          // Wait a bit and retry listing (eventual consistency)
+          await new Promise((r) => setTimeout(r, 3000));
+          const retryFiles = await listFiles(CHUNKS_BUCKET, sessionPath);
+          const retryChunkFiles = retryFiles
+            ?.filter((f) => f.name.startsWith("chunk-"))
+            .sort((a, b) => a.name.localeCompare(b.name)) || [];
+          
+          if (retryChunkFiles.length < minExpectedChunks) {
+            return NextResponse.json(
+              {
+                error: `Too many chunks missing: expected at least ${minExpectedChunks}, found ${retryChunkFiles.length}. Please wait and retry.`,
+                expectedChunkCount,
+                foundChunks: retryChunkFiles.length,
+                minExpectedChunks,
+                missing: expectedChunkCount - retryChunkFiles.length,
+              },
+              { status: 400 }
+            );
+          }
+          
+          // Update chunkFiles with retry results
+          chunkFiles.length = 0;
+          chunkFiles.push(...retryChunkFiles);
+          
+          // Re-extract indices
+          const retryIndices = chunkFiles.map((f) => {
+            const match = f.name.match(/chunk-(\d+)/);
+            return match ? parseInt(match[1], 10) : -1;
+          }).filter(idx => idx >= 0).sort((a, b) => a - b);
+          chunkIndices.length = 0;
+          chunkIndices.push(...retryIndices);
+          
+          console.log("After retry, chunks found", {
+            totalChunks: chunkFiles.length,
+            expectedChunkCount,
+            minExpectedChunks,
+          });
+        } else if (missing > 0) {
+          console.log("Some chunks missing but within acceptable range", {
+            expectedChunkCount,
+            foundChunks: chunkFiles.length,
+            missing,
+            note: "Proceeding with available chunks",
+          });
         }
-        
-        // Update chunkFiles with retry results
-        chunkFiles.length = 0;
-        chunkFiles.push(...retryChunkFiles);
-        
-        // Re-extract indices
-        const retryIndices = chunkFiles.map((f) => {
-          const match = f.name.match(/chunk-(\d+)/);
-          return match ? parseInt(match[1], 10) : -1;
-        }).filter(idx => idx >= 0).sort((a, b) => a - b);
-        chunkIndices.length = 0;
-        chunkIndices.push(...retryIndices);
-        
-        console.log("After retry, chunks found", {
-          totalChunks: chunkFiles.length,
-          expectedChunkCount,
-        });
       }
 
       if (chunkFiles.length === 0) {
@@ -253,6 +275,30 @@ export async function POST(
       // we may need to use a proper WebM muxer (e.g., webm-muxer) to handle container metadata.
       // For now, we'll concatenate and validate the result.
       const finalBuffer = Buffer.concat(chunks.map(c => c.data));
+      const finalSize = finalBuffer.length;
+
+      // Check if final file exceeds Supabase Free plan limit
+      if (finalSize > SUPABASE_FREE_PLAN_LIMIT) {
+        const sizeMB = (finalSize / 1024 / 1024).toFixed(2);
+        const limitMB = (SUPABASE_FREE_PLAN_LIMIT / 1024 / 1024).toFixed(0);
+        console.error("Final recording exceeds Supabase Free plan limit", {
+          size: finalSize,
+          sizeMB,
+          limitMB,
+          recordingDuration: expectedChunkCount ? `${expectedChunkCount}s` : "unknown",
+        });
+        
+        return NextResponse.json(
+          {
+            error: `Recording size (${sizeMB}MB) exceeds Supabase Free plan limit (${limitMB}MB). Please upgrade to Pro plan or reduce recording duration/quality.`,
+            size: finalSize,
+            sizeMB: parseFloat(sizeMB),
+            limitMB: parseFloat(limitMB),
+            recordingDuration: expectedChunkCount || 0,
+          },
+          { status: 413 } // 413 Payload Too Large
+        );
+      }
 
       // Determine file extension from first chunk or default to webm
       const extension = "webm"; // Default, could be determined from mimeType if stored
@@ -261,10 +307,37 @@ export async function POST(
 
       // Upload to Supabase Storage
       const bucket = process.env.STORAGE_BUCKET || "visits";
-      await uploadFile(bucket, storagePath, finalBuffer, {
-        contentType: `audio/${extension}`,
-        upsert: true,
-      });
+      try {
+        await uploadFile(bucket, storagePath, finalBuffer, {
+          contentType: `audio/${extension}`,
+          upsert: true,
+        });
+      } catch (uploadError) {
+        // Check if it's a size limit error
+        const errorMessage =
+          uploadError instanceof Error ? uploadError.message : String(uploadError);
+        if (
+          errorMessage.includes("size") ||
+          errorMessage.includes("limit") ||
+          errorMessage.includes("50")
+        ) {
+          const sizeMB = (finalSize / 1024 / 1024).toFixed(2);
+          console.error("Supabase storage size limit error during final upload", {
+            size: finalSize,
+            sizeMB,
+            error: errorMessage,
+          });
+          return NextResponse.json(
+            {
+              error: `Upload failed: File size limit exceeded. Recording size is ${sizeMB}MB, but Supabase Free plan has a 50MB limit per file. Please upgrade your plan or reduce recording duration/quality.`,
+              size: finalSize,
+              sizeMB: parseFloat(sizeMB),
+            },
+            { status: 413 } // 413 Payload Too Large
+          );
+        }
+        throw uploadError; // Re-throw if it's not a size error
+      }
 
       // Trigger transcription pipeline (call directly to avoid auth issues)
       let transcriptId: string | null = null;

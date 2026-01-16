@@ -74,12 +74,17 @@ export function useCallRecorder({
   }, []);
 
   // Create mixed audio stream from all participants
-  const createMixedStream = useCallback(() => {
+  const createMixedStream = useCallback(async () => {
     if (!room) return null;
 
     try {
       const audioCtx = new AudioContext();
       audioContextRef.current = audioCtx;
+
+      // Ensure AudioContext is running before creating destination
+      if (audioCtx.state === "suspended") {
+        await audioCtx.resume();
+      }
 
       // Monitor and resume AudioContext if it gets suspended
       // Some browsers suspend AudioContext after inactivity, which can cause MediaRecorder to stop
@@ -102,6 +107,12 @@ export function useCallRecorder({
 
       const destination = audioCtx.createMediaStreamDestination();
       destinationRef.current = destination;
+
+      console.log("AudioContext state:", {
+        state: audioCtx.state,
+        sampleRate: audioCtx.sampleRate,
+        destinationStreamTracks: destination.stream.getAudioTracks().length,
+      });
 
       // Add local audio track
       const localParticipant = room.localParticipant;
@@ -212,7 +223,7 @@ export function useCallRecorder({
       console.error("Error creating mixed stream:", error);
       return null;
     }
-  }, [room]);
+  }, [room]) as () => Promise<MediaStream | null>;
 
   // Upload chunk to server with offline fallback
   const uploadChunk = useCallback(
@@ -383,8 +394,8 @@ export function useCallRecorder({
     isStoppingRef.current = false;
 
     try {
-      // Create mixed stream
-      const mixedStream = createMixedStream();
+      // Create mixed stream (now async to ensure AudioContext is running)
+      const mixedStream = await createMixedStream();
       if (!mixedStream) {
         throw new Error("Failed to create mixed audio stream");
       }
@@ -414,10 +425,34 @@ export function useCallRecorder({
           id: t.id,
           state: t.readyState,
           enabled: t.enabled,
+          muted: t.muted,
         })),
         audioSourcesCount: audioSourcesRef.current.size,
         audioSourceKeys: Array.from(audioSourcesRef.current.keys()),
+        audioContextState: audioContextRef.current?.state,
       });
+
+      // Verify AudioContext is running
+      if (
+        audioContextRef.current &&
+        audioContextRef.current.state !== "running"
+      ) {
+        console.warn("AudioContext not running, attempting to resume...", {
+          state: audioContextRef.current.state,
+        });
+        try {
+          await audioContextRef.current.resume();
+          console.log("AudioContext resumed successfully");
+        } catch (error) {
+          console.error("Failed to resume AudioContext:", error);
+          throw new Error(
+            "AudioContext could not be started. Please check browser permissions."
+          );
+        }
+      }
+
+      // Wait a brief moment to ensure audio starts flowing
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       mixedStreamRef.current = mixedStream;
 
@@ -565,13 +600,35 @@ export function useCallRecorder({
             })
             .catch((error) => {
               const uploadDuration = Date.now() - uploadStartTime;
-              console.error(
-                `Error uploading chunk ${currentChunkIndex}:`,
-                error
-              );
+              const errorMessage =
+                error instanceof Error ? error.message : String(error);
+
+              // Check if it's a size limit error
+              if (
+                errorMessage.includes("size") ||
+                errorMessage.includes("limit") ||
+                errorMessage.includes("50") ||
+                errorMessage.includes("413")
+              ) {
+                console.error(
+                  `Chunk ${currentChunkIndex} upload failed due to size limit:`,
+                  errorMessage
+                );
+                toast.error(
+                  `Recording may be too large. Supabase Free plan has a 50MB limit. Consider stopping the recording soon.`
+                );
+              } else {
+                console.error(
+                  `Error uploading chunk ${currentChunkIndex}:`,
+                  error
+                );
+              }
+
               // Even if upload fails, the chunk is saved locally for retry
+              // Don't stop recording - just log the error and continue
               decrementUploads();
-              throw error; // Re-throw to keep promise rejected
+              // Don't re-throw - we want recording to continue even if uploads fail
+              // The chunk is saved locally and will be retried later
             });
           uploadPromisesRef.current.push(uploadPromise);
         } else {
@@ -586,16 +643,16 @@ export function useCallRecorder({
       (mediaRecorder as any).__chunkTimestamps = chunkTimestamps;
 
       // Monitor for gaps in chunk reception (indicates MediaRecorder might be stopping)
-      let lastChunkCheck = Date.now();
+      let lastDataRequestCheck = Date.now();
       const chunkMonitorInterval = setInterval(() => {
         const now = Date.now();
         const timeSinceLastChunk = now - lastChunkTime;
         const recordingDuration = now - recordingStartTimeRef.current;
 
-        // If we haven't received a chunk in 3 seconds and we've been recording for more than 10 seconds,
-        // something might be wrong
+        // If we haven't received a chunk in 5 seconds and we've been recording for more than 10 seconds,
+        // something might be wrong (but don't request data too frequently as it causes empty chunks)
         if (
-          timeSinceLastChunk > 3000 &&
+          timeSinceLastChunk > 5000 &&
           recordingDuration > 10000 &&
           mediaRecorder.state === "recording"
         ) {
@@ -606,22 +663,35 @@ export function useCallRecorder({
               recordingDuration: `${(recordingDuration / 1000).toFixed(1)}s`,
               recorderState: mediaRecorder.state,
               totalChunks: uploadPromisesRef.current.length,
+              streamTracks:
+                mixedStreamRef.current?.getAudioTracks().length || 0,
+              streamTrackStates:
+                mixedStreamRef.current?.getAudioTracks().map((t) => ({
+                  id: t.id,
+                  state: t.readyState,
+                  enabled: t.enabled,
+                  muted: t.muted,
+                })) || [],
             }
           );
 
-          // Try to request data to see if MediaRecorder is still responsive
-          try {
-            mediaRecorder.requestData();
-            console.log("Requested data to check MediaRecorder responsiveness");
-          } catch (error) {
-            console.error(
-              "Error requesting data - MediaRecorder might be dead:",
-              error
-            );
+          // Only request data if it's been a while since last request to avoid empty chunks
+          const timeSinceLastRequest = Date.now() - lastDataRequestCheck;
+          if (timeSinceLastRequest > 3000) {
+            try {
+              mediaRecorder.requestData();
+              lastDataRequestCheck = Date.now();
+              console.log(
+                "Requested data to check MediaRecorder responsiveness"
+              );
+            } catch (error) {
+              console.error(
+                "Error requesting data - MediaRecorder might be dead:",
+                error
+              );
+            }
           }
         }
-
-        lastChunkCheck = now;
       }, 5000); // Check every 5 seconds
 
       (mediaRecorder as any).__chunkMonitorInterval = chunkMonitorInterval;
@@ -687,13 +757,8 @@ export function useCallRecorder({
             });
           }
 
-          // Periodically request data to ensure chunks are being captured
-          // This helps prevent issues where MediaRecorder stops silently
-          try {
-            mediaRecorder.requestData();
-          } catch (error) {
-            console.warn("Error requesting data during monitoring:", error);
-          }
+          // Don't request data too frequently - let the timeslice interval handle it
+          // Requesting data too often causes empty chunks
         } else if (mediaRecorder.state === "paused") {
           console.warn("MediaRecorder is paused - this shouldn't happen", {
             recordingDuration: `${(recordingDuration / 1000).toFixed(1)}s`,
@@ -743,27 +808,51 @@ export function useCallRecorder({
         );
       };
 
-      // Start recording with 1 second timeslices for better chunk granularity
-      // Smaller timeslices help ensure all data is captured, especially on iPad
-      // Also periodically request data to prevent MediaRecorder from stopping silently
+      // Start recording with 2 second timeslices
+      // This allows enough time for audio data to accumulate before chunks are emitted
+      // Calling requestData() too frequently can result in empty chunks
       try {
-        // Request data immediately before starting to ensure we capture any initial data
-        mediaRecorder.start(1000); // Changed from 2000ms to 1000ms
+        // Start with a 2 second timeslice - this ensures chunks have actual audio data
+        mediaRecorder.start(2000);
         console.log("MediaRecorder started successfully", {
           state: mediaRecorder.state,
           mimeType: mediaRecorder.mimeType,
-          timeslice: 1000,
+          timeslice: 2000,
+          streamTracks: mixedStream.getAudioTracks().length,
+          streamTrackStates: mixedStream.getAudioTracks().map((t) => ({
+            id: t.id,
+            state: t.readyState,
+            enabled: t.enabled,
+            muted: t.muted,
+          })),
         });
 
-        // Periodically request data every 5 seconds to keep MediaRecorder active
-        // This prevents the recorder from stopping due to inactivity or browser limits
+        // Only request data periodically if we haven't received chunks naturally
+        // This prevents requesting empty chunks when timeslice hasn't elapsed
+        let lastDataRequestTime = Date.now();
         const dataRequestInterval = setInterval(() => {
           try {
             if (mediaRecorder.state === "recording") {
-              mediaRecorder.requestData();
-              console.log(
-                "Periodic data request sent to keep MediaRecorder active"
-              );
+              const timeSinceLastChunk = Date.now() - lastChunkTime;
+              // Only request data if we haven't received a chunk in 4+ seconds
+              // This prevents requesting data too early and getting empty chunks
+              if (timeSinceLastChunk > 4000) {
+                mediaRecorder.requestData();
+                lastDataRequestTime = Date.now();
+                console.log(
+                  "Requested data due to no chunks received in",
+                  `${(timeSinceLastChunk / 1000).toFixed(1)}s`
+                );
+              } else {
+                console.log(
+                  "Skipping data request - timeslice not elapsed yet",
+                  {
+                    timeSinceLastChunk: `${(timeSinceLastChunk / 1000).toFixed(
+                      1
+                    )}s`,
+                  }
+                );
+              }
             } else {
               clearInterval(dataRequestInterval);
             }
@@ -771,7 +860,7 @@ export function useCallRecorder({
             console.warn("Error in periodic data request:", error);
             clearInterval(dataRequestInterval);
           }
-        }, 5000); // Request data every 5 seconds
+        }, 10000); // Check every 10 seconds instead of requesting every 5
 
         // Store interval for cleanup
         (mediaRecorder as any).__dataRequestInterval = dataRequestInterval;
@@ -954,7 +1043,8 @@ export function useCallRecorder({
             const expectedChunks = chunkIndexRef.current; // Total chunks that should have been created
             const recordingDuration =
               Date.now() - recordingStartTimeRef.current;
-            const expectedChunkCount = Math.ceil(recordingDuration / 1000); // 1 chunk per second
+            // We use 2000ms timeslice, so calculate expected chunks based on that
+            const expectedChunkCount = Math.ceil(recordingDuration / 2000) + 1; // 2 seconds per chunk, +1 for final partial chunk
 
             console.log("Waiting for chunk uploads", {
               totalPromises: uploadPromises.length,
@@ -1137,9 +1227,11 @@ export function useCallRecorder({
             const finalExpectedChunks = chunkIndexRef.current;
             const finalRecordingDuration =
               Date.now() - recordingStartTimeRef.current;
+            // We use 2000ms timeslice, so calculate expected chunks based on that
+            // Add 1 to account for any partial chunk at the end
             const finalExpectedChunkCount = Math.max(
               finalExpectedChunks,
-              Math.ceil(finalRecordingDuration / 1000) // 1 chunk per second
+              Math.ceil(finalRecordingDuration / 2000) + 1 // 2 seconds per chunk, +1 for final partial chunk
             );
 
             let response: Response;
@@ -1436,86 +1528,12 @@ export function useCallRecorder({
         clearInterval(stream.__trackMonitorInterval);
       }
 
-      mixedStreamRef.current.getTracks().forEach((track) => track.stop());
-      mixedStreamRef.current = null;
+      // Stop all tracks in the mixed stream
+      const tracks = mixedStreamRef.current.getTracks();
+      tracks.forEach((track: MediaStreamTrack) => {
+        track.stop();
+      });
     }
-
-    destinationRef.current = null;
-    mediaRecorderRef.current = null;
-  }, []);
-
-  // Handle new remote tracks being added during recording
-  useEffect(() => {
-    if (
-      !room ||
-      !state.isRecording ||
-      !audioContextRef.current ||
-      !destinationRef.current
-    ) {
-      return;
-    }
-
-    const handleTrackSubscribed = (track: any, participant: any) => {
-      if (track.kind === "audio" && track.mediaStreamTrack) {
-        try {
-          const stream = new MediaStream([track.mediaStreamTrack]);
-          const source =
-            audioContextRef.current!.createMediaStreamSource(stream);
-          source.connect(destinationRef.current!);
-          audioSourcesRef.current.set(
-            `remote-${participant.sid}-${track.sid}`,
-            source
-          );
-        } catch (error) {
-          console.error("Error adding remote track to mix:", error);
-        }
-      }
-    };
-
-    const handleTrackUnsubscribed = (track: any, participant: any) => {
-      const key = `remote-${participant.sid}-${track.sid}`;
-      const source = audioSourcesRef.current.get(key);
-      if (source) {
-        try {
-          source.disconnect();
-        } catch (error) {
-          // Ignore errors
-        }
-        audioSourcesRef.current.delete(key);
-      }
-    };
-
-    // Listen to all participants for track events
-    room.participants.forEach((participant: any) => {
-      participant.on("trackSubscribed", (track: any) =>
-        handleTrackSubscribed(track, participant)
-      );
-      participant.on("trackUnsubscribed", (track: any) =>
-        handleTrackUnsubscribed(track, participant)
-      );
-    });
-
-    room.on(
-      "trackSubscribed",
-      (track: any, publication: any, participant: any) => {
-        if (track.kind === "audio") {
-          handleTrackSubscribed(track, participant);
-        }
-      }
-    );
-
-    room.on(
-      "trackUnsubscribed",
-      (track: any, publication: any, participant: any) => {
-        if (track.kind === "audio") {
-          handleTrackUnsubscribed(track, participant);
-        }
-      }
-    );
-
-    return () => {
-      // Cleanup listeners would be handled by room cleanup
-    };
   }, [room, state.isRecording]);
 
   // Cleanup on unmount

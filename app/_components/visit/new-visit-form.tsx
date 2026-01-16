@@ -780,10 +780,10 @@ export function NewVisitForm({
             {/* Diabetes Subsection */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-foreground border-b pb-2">Diabetes</h3>
-              <div className="grid gap-6 md:grid-cols-3">
+              <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
                 {/* Row 1 */}
                 {["fastingGlucose", "randomGlucose"].map((field) => (
-                  <div key={field} className="space-y-3">
+                  <div key={field} className="space-y-3 min-w-0">
                     <Label className="text-base">{field === "fastingGlucose" ? "Fasting Blood Glucose" : "Random Blood Glucose"}</Label>
                     <Input
                       {...form.register(`pointOfCare.diabetes.${field}` as any)}
@@ -791,15 +791,15 @@ export function NewVisitForm({
                     />
                   </div>
                 ))}
-                <div className="flex gap-3">
-                  <div className="flex-1 space-y-3">
+                <div className="flex gap-3 min-w-0">
+                  <div className="flex-1 space-y-3 min-w-0">
                     <Label className="text-base">HbA1c</Label>
                     <Input
                       {...form.register("pointOfCare.diabetes.hbA1cValue")}
                       placeholder="e.g. 7.1%"
                     />
                   </div>
-                  <div className="flex-1 space-y-3">
+                  <div className="flex-1 space-y-3 min-w-0">
                     <Label className="text-base">Date</Label>
                     <Input
                       type="date"
@@ -811,7 +811,7 @@ export function NewVisitForm({
 
                 {/* Row 2 */}
                 {["homeMonitoring", "averageReadings", "hypoglycemiaEpisodes"].map((field) => (
-                  <div key={field} className="space-y-3">
+                  <div key={field} className="space-y-3 min-w-0">
                     <Label className="text-base">
                       {field === "homeMonitoring" ? "Home Glucose Monitoring" : field === "averageReadings" ? "Average Readings" : "Hypoglycemia Episodes"}
                     </Label>
@@ -840,7 +840,7 @@ export function NewVisitForm({
 
                 {/* Row 3 */}
                 {["hyperglycemiaSymptoms", "footExam", "eyeExamDue"].map((field) => (
-                  <div key={field} className="space-y-3">
+                  <div key={field} className="space-y-3 min-w-0">
                     <Label className="text-base">
                       {field === "hyperglycemiaSymptoms" ? "Hyperglycemia Symptoms" : field === "footExam" ? "Foot Exam Performed" : "Eye Exam Due"}
                     </Label>
@@ -882,7 +882,7 @@ export function NewVisitForm({
             {/* HIV Subsection */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-foreground border-b pb-2">HIV</h3>
-              <div className="grid gap-6 md:grid-cols-3">
+              <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
                 <div className="space-y-3">
                   <Label className="text-base">HIV Result</Label>
                   <Select
@@ -905,7 +905,7 @@ export function NewVisitForm({
             {/* Syphilis Subsection */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-foreground border-b pb-2">Syphilis</h3>
-              <div className="grid gap-6 md:grid-cols-3">
+              <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 min-w-0">
                 <div className="space-y-3">
                   <Label className="text-base">Result</Label>
                   <Select
@@ -1094,8 +1094,8 @@ export function NewVisitForm({
         <div className="flex items-center gap-2">
           {/* Join Call button for virtual visits */}
           {visitAppointmentType?.toLowerCase() === "virtual" && visitTwilioRoomName && existingVisitId && (
-            <Button 
-              onClick={() => router.push(`/visit/${existingVisitId}/call`)} 
+            <Button
+              onClick={() => router.push(`/visit/${existingVisitId}/call`)}
               variant="default"
               className="bg-purple-600 hover:bg-purple-700"
             >

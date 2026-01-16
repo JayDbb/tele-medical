@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,12 +44,50 @@ interface PatientsListProps {
 
 export function PatientsList({ patients, userRole }: PatientsListProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [showVirtualModal, setShowVirtualModal] = useState<{ patientId: string; visitId: string; joinUrl: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const initialSearchQuery = searchParams.get("search") || "";
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
   const [currentPage, setCurrentPage] = useState(1);
 
   const PATIENTS_PER_PAGE = 3;
+
+  // Initialize search input from URL param on mount
+  React.useEffect(() => {
+    const topBarSearch = document.getElementById("patients-search") as HTMLInputElement;
+    if (topBarSearch && initialSearchQuery) {
+      topBarSearch.value = initialSearchQuery;
+      setSearchQuery(initialSearchQuery);
+    }
+  }, []);
+
+  // Sync search with top bar search input
+  React.useEffect(() => {
+    const topBarSearch = document.getElementById("patients-search") as HTMLInputElement;
+    if (topBarSearch) {
+      const handleInput = (e: Event) => {
+        const target = e.target as HTMLInputElement;
+        setSearchQuery(target.value);
+      };
+      topBarSearch.addEventListener("input", handleInput);
+      // Sync initial value
+      if (topBarSearch.value !== searchQuery) {
+        topBarSearch.value = searchQuery;
+      }
+      return () => {
+        topBarSearch.removeEventListener("input", handleInput);
+      };
+    }
+  }, [searchQuery]);
+
+  // Update top bar search when searchQuery changes (for external updates)
+  React.useEffect(() => {
+    const topBarSearch = document.getElementById("patients-search") as HTMLInputElement;
+    if (topBarSearch && topBarSearch.value !== searchQuery) {
+      topBarSearch.value = searchQuery;
+    }
+  }, [searchQuery]);
 
   const formatDate = (date: Date | null | string) => {
     if (!date) return "N/A";

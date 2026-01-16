@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { SideNav } from "@/components/side-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,8 +14,20 @@ interface CreatePatientShellProps {
 }
 
 export function CreatePatientShell({ children, userRole, userName }: CreatePatientShellProps) {
+    const router = useRouter();
     const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
     const openSidebarRef = React.useRef<(() => void) | null>(null);
+
+    const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Enter") {
+            const searchValue = (e.target as HTMLInputElement).value.trim();
+            if (searchValue) {
+                router.push(`/patients?search=${encodeURIComponent(searchValue)}`);
+            } else {
+                router.push("/patients");
+            }
+        }
+    };
 
     // Prevent body scrolling when this component is mounted
     React.useEffect(() => {
@@ -56,9 +69,10 @@ export function CreatePatientShell({ children, userRole, userName }: CreatePatie
                     </Button>
                     <div className="flex-1 min-w-0">
                         <Input
-                            placeholder="Search patients, MRN, or DOB"
+                            placeholder="Search patients, MRN, or DOB (press Enter to search)"
                             className="max-w-md w-full"
                             id="create-patient-search"
+                            onKeyDown={handleSearch}
                         />
                     </div>
                 </div>

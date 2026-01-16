@@ -19,6 +19,13 @@ export function SignatureCanvas({
   const [isDrawing, setIsDrawing] = React.useState(false);
   const [hasSignature, setHasSignature] = React.useState(false);
 
+  // Detect dark mode
+  const isDarkMode = React.useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ||
+           document.documentElement.classList.contains("dark");
+  }, []);
+
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -30,7 +37,11 @@ export function SignatureCanvas({
     canvas.width = width;
     canvas.height = height;
 
-    // Set drawing style
+    // Set white background for visibility in both light and dark mode
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Set drawing style - always use black for signature (visible on white background)
     ctx.strokeStyle = "#000000";
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
@@ -114,7 +125,15 @@ export function SignatureCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // Clear and restore white background
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Restore stroke style
+    ctx.strokeStyle = "#000000";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     setHasSignature(false);
   };
 
@@ -145,7 +164,7 @@ export function SignatureCanvas({
           onTouchStart={startDrawing}
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
-          className="w-full cursor-crosshair touch-none"
+          className="w-full cursor-crosshair touch-none bg-white"
           style={{ maxWidth: `${width}px`, height: `${height}px` }}
         />
       </div>

@@ -513,16 +513,73 @@ export class SyncEngine {
 
     try {
       const parsingData = JSON.parse(currentDraft.pendingParsing);
-      const { transcript, previousTranscripts, patientId } = parsingData;
+      const { audioFileId, audioPath, transcript, previousTranscripts, patientId } = parsingData;
 
-      const parseResponse = await fetch("/api/ai/parse-visit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript,
-          previousTranscripts,
-        }),
-      });
+      let parseResponse: Response;
+      
+      // If we have an audioPath, use the new endpoint (file already uploaded to storage)
+      if (audioPath) {
+        parseResponse = await fetch("/api/ai/parse-audio-openrouter", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audioPath,
+            previousTranscripts: previousTranscripts && previousTranscripts.length > 0 ? previousTranscripts : undefined,
+          }),
+        });
+      } else if (audioFileId) {
+        // If we have audioFileId but no audioPath, we need to upload first
+        const audioFile = await getFile(audioFileId);
+        if (!audioFile) {
+          console.error(`Audio file ${audioFileId} not found in IndexedDB`);
+          await db.draftVisits.update(draft.draftId, {
+            pendingParsing: undefined,
+            parseRetryCount: 0,
+          } as any);
+          toast.error("Audio file not found. Please try recording again.");
+          return;
+        }
+
+        // Upload to storage first
+        const path = `visits/${patientId}/${audioFileId}/${Date.now()}.${audioFile.name.split('.').pop() || 'mp3'}`;
+        const uploadFormData = new FormData();
+        uploadFormData.append("file", audioFile.blob, audioFile.name);
+        uploadFormData.append("path", path);
+
+        const uploadResponse = await fetch("/api/upload/audio", {
+          method: "POST",
+          body: uploadFormData,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error("Failed to upload audio file");
+        }
+
+        const uploadData = await uploadResponse.json();
+        const uploadedPath = uploadData.path || path;
+
+        // Now process with the uploaded path
+        parseResponse = await fetch("/api/ai/parse-audio-openrouter", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audioPath: uploadedPath,
+            previousTranscripts: previousTranscripts && previousTranscripts.length > 0 ? previousTranscripts : undefined,
+          }),
+        });
+      } else if (transcript) {
+        // Fallback to old endpoint if we have transcript (backward compatibility)
+        parseResponse = await fetch("/api/ai/parse-visit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            transcript,
+            previousTranscripts,
+          }),
+        });
+      } else {
+        throw new Error("No audio file, audioPath, or transcript found in pending parsing data");
+      }
 
       if (parseResponse.ok) {
         const responseData = await parseResponse.json();
@@ -556,7 +613,7 @@ export class SyncEngine {
           return;
         }
 
-        const { parsed } = responseData;
+        const { parsed, transcript: newTranscript } = responseData;
         if (parsed) {
           // Verify draft still has pending parsing before clearing
           const verifyDraft = await db.draftVisits.get(draft.draftId);

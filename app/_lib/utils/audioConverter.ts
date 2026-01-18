@@ -169,8 +169,8 @@ export async function _convertToMP3Internal(audioBlob: Blob): Promise<Blob> {
     );
   }
 
-  // Create MP3 encoder
-  const mp3encoder = new Mp3Encoder(numberOfChannels, sampleRate, 128); // 128 kbps bitrate
+  // Create MP3 encoder with lower bitrate for faster uploads (64 kbps is sufficient for speech)
+  const mp3encoder = new Mp3Encoder(numberOfChannels, sampleRate, 64); // 64 kbps bitrate for speech
 
   // Validate encoder was created properly
   if (!mp3encoder) {

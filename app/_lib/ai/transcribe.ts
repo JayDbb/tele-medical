@@ -13,7 +13,7 @@ export async function transcribeAudio(audioPath: string) {
   }
 
   // Get signed URL from Supabase Storage using service role key
-  const bucket = process.env.STORAGE_BUCKET || "visits";
+  const bucket = process.env.STORAGE_BUCKET || "telehealth_audio";
 
   let audioUrl: string;
   try {

@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bucket = process.env.STORAGE_BUCKET || "visits";
+    const bucket = process.env.STORAGE_BUCKET || "telehealth_audio";
 
     // Convert File to ArrayBuffer for upload
     const arrayBuffer = await file.arrayBuffer();

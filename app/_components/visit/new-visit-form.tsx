@@ -1056,7 +1056,7 @@ export function NewVisitForm({
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-3xl font-bold text-foreground">New Visit</h1>
+            <h1 className="text-3xl font-bold text-foreground">{existingVisitId ? "Continue Note" : "New Visit"}</h1>
             {isRecording && (
               <Badge variant="destructive" className="gap-2 animate-pulse">
                 <div className="w-2 h-2 bg-white rounded-full" />

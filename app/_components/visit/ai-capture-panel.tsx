@@ -2,10 +2,10 @@
 
 import * as React from "react";
 import { useState, useRef } from "react";
-import { Mic, Upload, Loader2, FileAudio, X } from "lucide-react";
+import { Mic, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { _convertToMP3Internal, preloadLamejs } from "@/app/_lib/utils/audioConverter";
 import { storeFile } from "@/app/_lib/offline/files";
@@ -31,7 +31,6 @@ export function AICapturePanel({
     onTranscriptReady,
     onParseReady,
 }: AICapturePanelProps) {
-    const [activeTab, setActiveTab] = useState<"record" | "upload">("record");
     const [state, setState] = useState<CaptureState>("idle");
     const [progress, setProgress] = useState(0);
     const [recordingTime, setRecordingTime] = useState(0);
@@ -41,8 +40,6 @@ export function AICapturePanel({
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
     // Pre-load lamejs when component mounts (if online)
     React.useEffect(() => {
         if (navigator.onLine) {
@@ -97,20 +94,6 @@ export function AICapturePanel({
         }
     };
 
-    const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        if (!file.type.startsWith("audio/")) {
-            toast.error("Please select an audio file");
-            return;
-        }
-
-        setState("converting");
-        const audioBlob = new Blob([file], { type: file.type });
-        await handleAudioBlob(audioBlob);
-    };
-
     const handleAudioBlob = async (audioBlob: Blob) => {
         try {
             setProgress(20);
@@ -125,10 +108,14 @@ export function AICapturePanel({
                 fileExtension = "mp3";
                 mimeType = "audio/mpeg";
                 setProgress(40);
-            } catch (conversionError: any) {
+            } catch (conversionError: unknown) {
                 // If conversion fails (e.g., offline, chunk load error), use original format
                 console.warn("MP3 conversion failed, using original format:", conversionError);
-                if (conversionError.message?.includes("offline") || conversionError.message?.includes("chunk")) {
+                if (
+                    conversionError instanceof Error &&
+                    (conversionError.message.includes("offline") ||
+                        conversionError.message.includes("chunk"))
+                ) {
                     toast.warning("MP3 conversion unavailable. Storing audio in original format.");
                 }
                 // Continue with original blob
@@ -146,7 +133,6 @@ export function AICapturePanel({
             const isOnline = navigator.onLine;
             if (!isOnline) {
                 // Queue for later processing when online
-                const { saveDraft } = await import("@/app/_lib/offline/draft");
                 const { getOfflineDB } = await import("@/app/_lib/offline/db");
 
                 const db = getOfflineDB();
@@ -199,7 +185,6 @@ export function AICapturePanel({
             } catch (uploadError) {
                 console.warn("Upload failed:", uploadError);
                 // Queue for retry
-                const { saveDraft } = await import("@/app/_lib/offline/draft");
                 const { getOfflineDB } = await import("@/app/_lib/offline/db");
 
                 const db = getOfflineDB();
@@ -238,28 +223,41 @@ export function AICapturePanel({
                 });
 
                 if (!parseResponse.ok) {
-                    // Processing failed, queue for retry
-                    const { saveDraft } = await import("@/app/_lib/offline/draft");
-                    const { getOfflineDB } = await import("@/app/_lib/offline/db");
+                    const errorPayload = await parseResponse.json().catch(() => null);
+                    const errorCode = errorPayload?.code as string | undefined;
+                    const errorMessage =
+                        (errorPayload?.error as string | undefined) ||
+                        "Processing failed";
 
-                    const db = getOfflineDB();
-                    const draft = await db.draftVisits
-                        .where("patientId")
-                        .equals(patientId)
-                        .first();
+                    const isRetryable =
+                        parseResponse.status >= 500 &&
+                        errorCode !== "TRANSCRIPTION_UNAVAILABLE" &&
+                        errorCode !== "PARSING_UNAVAILABLE";
 
-                    if (draft) {
-                        await db.draftVisits.update(draft.draftId, {
-                            pendingParsing: JSON.stringify({
-                                audioFileId: fileId,
-                                audioPath: audioPath || path,
-                                previousTranscripts: previousTranscripts.length > 0 ? previousTranscripts : undefined,
-                                patientId,
-                            }),
-                        });
+                    if (isRetryable) {
+                        const { getOfflineDB } = await import("@/app/_lib/offline/db");
+
+                        const db = getOfflineDB();
+                        const draft = await db.draftVisits
+                            .where("patientId")
+                            .equals(patientId)
+                            .first();
+
+                        if (draft) {
+                            await db.draftVisits.update(draft.draftId, {
+                                pendingParsing: JSON.stringify({
+                                    audioFileId: fileId,
+                                    audioPath: audioPath || path,
+                                    previousTranscripts: previousTranscripts.length > 0 ? previousTranscripts : undefined,
+                                    patientId,
+                                }),
+                            });
+                        }
+
+                        throw new Error("Processing failed, will retry when connection is restored");
                     }
 
-                    throw new Error("Processing failed, will retry when connection is restored");
+                    throw new Error(errorMessage);
                 }
 
                 const { parsed, transcript: newTranscript } = await parseResponse.json();
@@ -296,7 +294,15 @@ export function AICapturePanel({
                 }, 2000);
             } catch (processError) {
                 console.error("Error processing audio:", processError);
-                toast.warning("Processing failed. Will retry when connection is restored.");
+                const errorMessage =
+                    processError instanceof Error ? processError.message : "Processing failed";
+                const willRetry = errorMessage.includes("will retry when connection is restored");
+
+                toast.warning(
+                    willRetry
+                        ? "Processing failed. Will retry when connection is restored."
+                        : errorMessage
+                );
                 setState("idle");
                 setProgress(0);
             }
@@ -341,12 +347,6 @@ export function AICapturePanel({
         setTranscript(null);
         setPreviousTranscripts([]);
         chunksRef.current = [];
-
-        // Clear file input
-        if (fileInputRef.current) {
-            fileInputRef.current.value = "";
-        }
-
         toast.success("Cleared all data");
     };
 
@@ -369,7 +369,7 @@ export function AICapturePanel({
                 </div>
             </CardHeader>
             <CardContent>
-                <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "record" | "upload")}>
+                <Tabs value="record">
 
 
                     <TabsContent value="record" className="space-y-4">

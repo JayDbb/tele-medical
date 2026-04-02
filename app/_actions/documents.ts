@@ -4,6 +4,7 @@ import { revalidateTag } from "next/cache";
 import { requireUser } from "@/app/_lib/auth/get-current-user";
 import { createDocument, getPatientDocuments, deleteDocument } from "@/app/_lib/db/drizzle/queries/documents";
 import { getSignedUrl, deleteFile } from "@/app/_lib/storage";
+import { getDocumentsStorageBucket } from "@/app/_lib/storage/config";
 
 export interface CreateDocumentActionParams {
   patientId: string;
@@ -75,10 +76,10 @@ export async function getDocumentSignedUrlAction(storageUrl: string) {
     
     // Extract bucket and path from storageUrl
     // Format: tele-med-docs/patientId/uuid-filename or tele-med-docs/patientId/visitId/uuid-filename
-    const bucket = "tele-med-docs";
+    const bucket = getDocumentsStorageBucket();
     // Remove bucket prefix if present, otherwise use storageUrl as-is
-    const path = storageUrl.startsWith("tele-med-docs/")
-      ? storageUrl.replace("tele-med-docs/", "")
+    const path = storageUrl.startsWith(`${bucket}/`)
+      ? storageUrl.replace(`${bucket}/`, "")
       : storageUrl;
     
     const urlData = await getSignedUrl(bucket, path, 3600); // 1 hour expiry
@@ -101,10 +102,10 @@ export async function deleteDocumentAction(documentId: string, storageUrl: strin
     await requireUser(["doctor", "nurse"]);
     
     // Delete from storage first
-    const bucket = "tele-med-docs";
+    const bucket = getDocumentsStorageBucket();
     // Remove bucket prefix if present, otherwise use storageUrl as-is
-    const path = storageUrl.startsWith("tele-med-docs/")
-      ? storageUrl.replace("tele-med-docs/", "")
+    const path = storageUrl.startsWith(`${bucket}/`)
+      ? storageUrl.replace(`${bucket}/`, "")
       : storageUrl;
     
     try {

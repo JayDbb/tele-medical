@@ -15,21 +15,31 @@ if (!process.env.DATABASE_URL) {
 
 // Use singleton pattern in development to avoid too many connections
 declare global {
-  // eslint-disable-next-line no-var
   var postgresClient: postgres.Sql | undefined;
 }
 
 let postgresClient: postgres.Sql;
+const connectionString = process.env.DATABASE_URL;
+
+function createPostgresClient() {
+  return postgres(connectionString, {
+    max: 1,
+    ssl: "require",
+    prepare: false,
+    connect_timeout: 15,
+    idle_timeout: 20,
+    max_lifetime: 60 * 30,
+    // onnotice: () => {
+    //   // Suppress noisy pooler notices in development logs.
+    // },
+  });
+}
 
 if (process.env.NODE_ENV === "production") {
-  postgresClient = postgres(process.env.DATABASE_URL, {
-    max: 1,
-  });
+  postgresClient = createPostgresClient();
 } else {
   if (!global.postgresClient) {
-    global.postgresClient = postgres(process.env.DATABASE_URL, {
-      max: 1,
-    });
+    global.postgresClient = createPostgresClient();
   }
   postgresClient = global.postgresClient;
 }

@@ -145,10 +145,10 @@ export function VisitHistoryContent({
   // Get status badge with color coding
   const getStatusBadge = (status: string | null) => {
     if (!status) {
-      return { variant: "secondary" as const, className: "" };
+      return { variant: "secondary" as const, className: "", label: status || "—" };
     }
     const statusLower = status.toLowerCase();
-    
+
     // Handle both new and old status values for backward compatibility
     if (
       status === "Signed & Complete" ||
@@ -159,12 +159,14 @@ export function VisitHistoryContent({
       return {
         variant: "default" as const,
         className: "bg-green-500 text-white border-green-600 dark:bg-green-600",
+        label: "Signed & Complete",
       };
     }
     if (status === "Waiting" || statusLower === "waiting") {
       return {
         variant: "outline" as const,
         className: "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500 dark:border-blue-400",
+        label: "Waiting",
       };
     }
     if (
@@ -175,15 +177,17 @@ export function VisitHistoryContent({
       return {
         variant: "outline" as const,
         className: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500 dark:border-yellow-400",
+        label: "In Progress",
       };
     }
     if (statusLower === "draft") {
       return {
         variant: "secondary" as const,
         className: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500 dark:border-gray-400",
+        label: "Draft",
       };
     }
-    return { variant: "outline" as const, className: "" };
+    return { variant: "outline" as const, className: "", label: status || "—" };
   };
 
   return (
@@ -310,7 +314,7 @@ export function VisitHistoryContent({
                             const badge = getStatusBadge(visit.status);
                             return (
                               <Badge variant={badge.variant} className={badge.className}>
-                            {visit.status || "—"}
+                            {badge.label}
                           </Badge>
                             );
                           })()}

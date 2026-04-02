@@ -1,7 +1,8 @@
 import { eq, desc, or, isNull, and, inArray } from "drizzle-orm";
 import { unstable_cache } from "next/cache";
 import { db } from "../index";
-import { patients, visits, users, notes } from "../schema";
+import { patients, visits, users, notes, documents } from "../schema";
+import type { VisitNote } from "@/app/_lib/visit-note/schema";
 
 /**
  * Find existing patients by phone or email
@@ -284,6 +285,7 @@ export async function getPatientOverview(patientId: string) {
       familyHistory: patients.familyHistory,
       socialHistory: patients.socialHistory,
       pastMedicalHistory: patients.pastMedicalHistory,
+      surgicalHistory: patients.surgicalHistory,
     })
     .from(patients)
     .where(eq(patients.id, patientId))
@@ -312,6 +314,41 @@ export async function getPatientOverview(patientId: string) {
 
   const latestVisit = latestVisitResult[0] || null;
 
+  const patientVisits = await db
+    .select({
+      id: visits.id,
+    })
+    .from(visits)
+    .where(eq(visits.patientId, patientId));
+
+  const visitIds = patientVisits.map((visit) => visit.id);
+
+  let ordersCount = 0;
+  if (visitIds.length > 0) {
+    const patientNotes = await db
+      .select({
+        note: notes.note,
+      })
+      .from(notes)
+      .where(inArray(notes.visitId, visitIds));
+
+    ordersCount = patientNotes.reduce((total, entry) => {
+      if (!entry.note || typeof entry.note !== "object") {
+        return total;
+      }
+
+      const visitNote = entry.note as VisitNote;
+      return total + (Array.isArray(visitNote.orders) ? visitNote.orders.length : 0);
+    }, 0);
+  }
+
+  const patientDocuments = await db
+    .select({
+      id: documents.id,
+    })
+    .from(documents)
+    .where(eq(documents.patientId, patientId));
+
   // Get latest note for the latest visit to extract chief complaint
   let chiefComplaint: string | null = null;
   if (latestVisit) {
@@ -338,6 +375,10 @@ export async function getPatientOverview(patientId: string) {
 
       return {
         patient: patient[0],
+        stats: {
+          ordersCount,
+          documentsCount: patientDocuments.length,
+        },
         latestVisit: latestVisit
           ? {
               ...latestVisit,

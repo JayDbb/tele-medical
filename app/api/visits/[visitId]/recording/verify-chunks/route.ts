@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "@/app/_lib/supabase/server";
 import { getVisitById } from "@/app/_lib/db/drizzle/queries/visit";
 import { listFiles } from "@/app/_lib/storage";
+import { getAudioStorageBucket } from "@/app/_lib/storage/config";
 
 export const runtime = "nodejs";
 
-const CHUNKS_BUCKET = "telehealth_audio";
+const CHUNKS_BUCKET = getAudioStorageBucket();
 
 /**
  * Verify how many chunks are uploaded for a recording session

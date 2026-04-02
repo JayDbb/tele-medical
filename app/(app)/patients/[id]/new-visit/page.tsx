@@ -1,7 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import { getCurrentUser } from "@/app/_lib/auth/get-current-user";
 import { getPatientBasics } from "@/app/_lib/db/drizzle/queries/patient";
-import { getVisitDetails } from "@/app/_lib/db/drizzle/queries/visit";
+import { getPatientOpenVisit, getVisitDetails } from "@/app/_lib/db/drizzle/queries/visit";
 import { NewVisitForm } from "@/app/_components/visit/new-visit-form";
 
 interface NewVisitPageProps {
@@ -35,6 +35,13 @@ export default async function NewVisitPage({
     notFound();
   }
 
+  if (!visitId) {
+    const openVisit = await getPatientOpenVisit(patientId);
+    if (openVisit) {
+      redirect(`/patients/${patientId}/new-visit?visitId=${openVisit.id}`);
+    }
+  }
+
   // If visitId is provided, load existing visit data for editing
   let existingVisitData = null;
   let visitAppointmentType: string | null = null;
@@ -52,6 +59,7 @@ export default async function NewVisitPage({
 
   return (
     <NewVisitForm
+      key={`${patientId}:${visitId || "new"}`}
       patientId={patientId}
       patientBasics={patientBasics}
       userId={user.id}

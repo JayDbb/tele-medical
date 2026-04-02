@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/app/_lib/auth/get-current-user";
 import { uploadFile } from "@/app/_lib/storage";
+import { getAudioStorageBucket } from "@/app/_lib/storage/config";
 
 /**
  * Upload audio file to Supabase Storage
@@ -10,7 +11,7 @@ import { uploadFile } from "@/app/_lib/storage";
 export async function POST(request: NextRequest) {
   try {
     // Verify auth
-    const user = await requireUser(["doctor", "nurse"]);
+    await requireUser(["doctor", "nurse"]);
 
     const formData = await request.formData();
     const file = formData.get("file") as File;
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bucket = process.env.STORAGE_BUCKET || "telehealth_audio";
+    const bucket = getAudioStorageBucket();
 
     // Convert File to ArrayBuffer for upload
     const arrayBuffer = await file.arrayBuffer();

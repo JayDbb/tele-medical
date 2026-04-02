@@ -11,9 +11,8 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Calendar, Heart, Pill, Users2, History, AlertTriangle, FileText, Package, Video, QrCode, Copy, Check } from "lucide-react";
+import { Calendar, Heart, Pill, History, AlertTriangle, FileText, Video, Copy, Check } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { cn } from "@/app/_lib/utils/cn";
 import { toast } from "sonner";
 
 interface PatientOverviewCardsProps {
@@ -28,6 +27,11 @@ interface PatientOverviewCardsProps {
     familyHistory: unknown;
     socialHistory: unknown;
     pastMedicalHistory: unknown;
+    surgicalHistory: unknown;
+  };
+  stats: {
+    ordersCount: number;
+    documentsCount: number;
   };
   latestVisit: {
     id: string;
@@ -67,6 +71,7 @@ function calculateVisitProgress(notesStatus: string | null): number {
 
 export function PatientOverviewCards({
   patient,
+  stats,
   latestVisit,
   userRole,
 }: PatientOverviewCardsProps) {
@@ -138,6 +143,7 @@ export function PatientOverviewCards({
   const familyHistory = normalizeJsonb(patient.familyHistory);
   const socialHistory = normalizeJsonb(patient.socialHistory);
   const pastMedicalHistory = normalizeJsonb(patient.pastMedicalHistory);
+  const surgicalHistory = normalizeJsonb(patient.surgicalHistory);
 
   // Get the most recent vital entry (sorted by date, most recent first)
   const latestVital = vitalsArray.length > 0
@@ -370,7 +376,7 @@ export function PatientOverviewCards({
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Surgical History</p>
-              <p className="text-lg font-semibold">0</p>
+              <p className="text-lg font-semibold">{surgicalHistory.length}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Past Medical History</p>
@@ -408,11 +414,11 @@ export function PatientOverviewCards({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-muted-foreground mb-1">Orders</p>
-              <p className="text-lg font-semibold">0</p>
+              <p className="text-lg font-semibold">{stats.ordersCount}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Documents</p>
-              <p className="text-lg font-semibold">0</p>
+              <p className="text-lg font-semibold">{stats.documentsCount}</p>
             </div>
           </div>
           <Separator />

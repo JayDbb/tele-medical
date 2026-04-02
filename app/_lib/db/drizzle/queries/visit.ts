@@ -1,4 +1,4 @@
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, or, desc, inArray } from "drizzle-orm";
 import { db } from "../index";
 import { visits, notes, transcripts, patients, users } from "../schema";
 import type { VisitNote } from "@/app/_lib/visit-note/schema";
@@ -258,15 +258,6 @@ export async function finalizeVisit(
     .limit(1);
   const userName = userResult[0]?.name || userResult[0]?.email || null;
 
-  // Get current visit status
-  const currentVisit = await db
-    .select()
-    .from(visits)
-    .where(eq(visits.id, visitId))
-    .limit(1);
-
-  const fromStatus = currentVisit[0]?.status || null;
-
   // Map old status values to new ones
   const newStatus =
     status === "signed" ? "Signed & Complete" : "Signed & Complete";
@@ -344,8 +335,6 @@ export async function markVisitInProgress(
   if (!currentVisit[0]) {
     throw new Error("Visit not found");
   }
-
-  const fromStatus = currentVisit[0].status;
 
   // Update visit status
   await db
@@ -573,6 +562,123 @@ export async function getPatientOpenVisit(patientId: string) {
     .limit(1);
 
   return result[0] || null;
+}
+
+export interface PatientLogHistoryResult {
+  patient: {
+    id: string;
+    fullName: string;
+  };
+  entries: Array<{
+    visitId: string;
+    visitCreatedAt: Date;
+    visitStatus: string | null;
+    appointmentType: string | null;
+    timestamp: Date;
+    userId: string | null;
+    userName: string | null;
+    action: string;
+    fromStatus: string | null;
+    toStatus: string;
+    reason?: string;
+  }>;
+}
+
+export async function getPatientLogHistory(
+  patientId: string
+): Promise<PatientLogHistoryResult | null> {
+  const patientResult = await db
+    .select({
+      id: patients.id,
+      fullName: patients.fullName,
+    })
+    .from(patients)
+    .where(eq(patients.id, patientId))
+    .limit(1);
+
+  if (!patientResult[0]) {
+    return null;
+  }
+
+  const patientVisits = await db
+    .select({
+      id: visits.id,
+      createdAt: visits.createdAt,
+      status: visits.status,
+      appointmentType: visits.appointmentType,
+    })
+    .from(visits)
+    .where(eq(visits.patientId, patientId))
+    .orderBy(desc(visits.createdAt));
+
+  if (patientVisits.length === 0) {
+    return {
+      patient: patientResult[0],
+      entries: [],
+    };
+  }
+
+  const visitIds = patientVisits.map((visit) => visit.id);
+  const notesResult = await db
+    .select({
+      visitId: notes.visitId,
+      audit: notes.audit,
+    })
+    .from(notes)
+    .where(inArray(notes.visitId, visitIds));
+
+  const visitMap = new Map(patientVisits.map((visit) => [visit.id, visit]));
+  const entries: PatientLogHistoryResult["entries"] = [];
+
+  for (const note of notesResult) {
+    if (!note.audit) {
+      continue;
+    }
+
+    const audit = note.audit as {
+      entries?: Array<{
+        timestamp: string;
+        userId: string | null;
+        userName: string | null;
+        action: string;
+        fromStatus: string | null;
+        toStatus: string;
+        reason?: string;
+      }>;
+    } | null;
+
+    if (!audit?.entries?.length) {
+      continue;
+    }
+
+    const visit = visitMap.get(note.visitId);
+    if (!visit) {
+      continue;
+    }
+
+    for (const entry of audit.entries) {
+      entries.push({
+        visitId: note.visitId,
+        visitCreatedAt: visit.createdAt,
+        visitStatus: visit.status,
+        appointmentType: visit.appointmentType,
+        timestamp: new Date(entry.timestamp),
+        userId: entry.userId,
+        userName: entry.userName,
+        action: entry.action,
+        fromStatus: entry.fromStatus,
+        toStatus: entry.toStatus,
+        reason: entry.reason,
+      });
+    }
+  }
+
+  entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+  return {
+    patient: patientResult[0],
+    entries,
+  };
 }
 
 /**

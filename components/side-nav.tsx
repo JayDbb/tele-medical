@@ -32,7 +32,6 @@ const medicalSections = [
     { id: "past-medical", label: "Past Medical History", href: "/past-medical-history", icon: <History className="h-4 w-4" /> },
     { id: "orders", label: "Orders", href: "/orders", icon: <FileText className="h-4 w-4" /> },
     { id: "documents", label: "Documents", href: "/documents", icon: <FolderOpen className="h-4 w-4" /> },
-    { id: "log", label: "Log History", href: "/log-history", icon: <FileText className="h-4 w-4" /> },
 ];
 
 export function SideNav({ userRole, userName, patientId, patientName, onMobileStateChange, openMenuRef }: SideNavProps) {

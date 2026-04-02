@@ -65,8 +65,7 @@ export async function middleware(request: NextRequest) {
           error?.message?.includes("rate limit")
         ) {
           lastRateLimitTime = now;
-          // Silently allow request through - don't log to reduce spam
-          // Treat as unauthenticated to avoid redirect loops
+          // Allow request through during rate limiting
           return response;
         }
 
@@ -80,12 +79,15 @@ export async function middleware(request: NextRequest) {
           authError?.message?.includes("rate limit")
         ) {
           lastRateLimitTime = now;
-          // Silently allow request through - don't log to reduce spam
           return response;
         }
         // For other errors, treat as unauthenticated
         isAuthenticated = false;
       }
+    } else {
+      // During cooldown, allow request through rather than treating
+      // as unauthenticated (which would incorrectly redirect to sign-in)
+      return response;
     }
 
     // If user is authenticated and trying to access auth pages, redirect to role-specific page

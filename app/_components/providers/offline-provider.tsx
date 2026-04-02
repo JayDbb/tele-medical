@@ -29,9 +29,15 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
   const [failedCount, setFailedCount] = useState(0);
 
   useEffect(() => {
-    // Initialize sync engine
-    const syncEngine = getSyncEngine();
-    syncEngine.start();
+    // Initialize sync engine — guard against IndexedDB failures
+    let syncEngine: ReturnType<typeof getSyncEngine>;
+    try {
+      syncEngine = getSyncEngine();
+      syncEngine.start();
+    } catch (err) {
+      console.warn("Offline sync engine failed to start:", err);
+      return;
+    }
 
     // Update online status
     const updateOnlineStatus = () => setOnline(isOnline());

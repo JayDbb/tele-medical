@@ -1,4 +1,4 @@
-import { getOfflineDB } from "./db";
+import { getOfflineDB, isOfflineDBAvailable } from "./db";
 import { getFile, getFileBlob } from "./files";
 import { saveDraft } from "./draft";
 import { toast } from "sonner";
@@ -59,6 +59,7 @@ export class SyncEngine {
    */
   private async syncPendingOperations() {
     if (!isOnline()) return;
+    if (!isOfflineDBAvailable()) return;
 
     // Prevent concurrent sync operations
     if (this.isSyncing) {

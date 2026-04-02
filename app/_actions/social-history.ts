@@ -9,6 +9,44 @@ import {
   type SocialHistory,
 } from "@/app/_lib/db/drizzle/queries/social-history";
 
+/** Shallow-merge nested objects so partial form tabs do not wipe sibling fields (e.g. occupation). */
+function mergeSocialHistoryPatch(
+  existing: SocialHistory,
+  updates: Partial<SocialHistory>
+): SocialHistory {
+  const mergeObj = <T extends Record<string, unknown> | undefined>(
+    base: T,
+    patch: T | undefined
+  ): T | undefined => {
+    if (patch === undefined) return base;
+    if (base === undefined || base === null) return patch;
+    return { ...base, ...patch } as T;
+  };
+
+  return {
+    ...existing,
+    tobacco: mergeObj(existing.tobacco, updates.tobacco),
+    alcohol: mergeObj(existing.alcohol, updates.alcohol),
+    otherSubstances:
+      updates.otherSubstances !== undefined
+        ? updates.otherSubstances
+        : existing.otherSubstances,
+    occupation: mergeObj(existing.occupation, updates.occupation),
+    livingSituation: mergeObj(
+      existing.livingSituation,
+      updates.livingSituation
+    ),
+    lifestyle: mergeObj(existing.lifestyle, updates.lifestyle),
+    psychosocial: mergeObj(existing.psychosocial, updates.psychosocial),
+    sexualHealth: mergeObj(existing.sexualHealth, updates.sexualHealth),
+    clinicianNotes:
+      updates.clinicianNotes !== undefined
+        ? updates.clinicianNotes
+        : existing.clinicianNotes,
+    lastUpdated: new Date().toISOString(),
+  };
+}
+
 export async function getPatientSocialHistoryAction(patientId: string) {
   const session = await getServerSession();
 
@@ -53,11 +91,7 @@ export async function updateSocialHistoryAction(
 
   try {
     const existing = (await getPatientSocialHistory(patientId)) || {};
-    const updated: SocialHistory = {
-      ...existing,
-      ...updates,
-      lastUpdated: new Date().toISOString(),
-    };
+    const updated = mergeSocialHistoryPatch(existing, updates);
 
     await updatePatientSocialHistory(patientId, updated);
 

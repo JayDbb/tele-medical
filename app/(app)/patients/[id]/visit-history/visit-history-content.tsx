@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Calendar, Search, X, AudioWaveform } from "lucide-react";
+import { Calendar, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +18,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { VisitHistoryResult } from "@/app/_lib/db/drizzle/queries/visit-history";
+import { formatDateTime } from "@/app/_lib/utils/format-date";
+import { formatVisitStatusLabel } from "@/app/_lib/utils/visit-status-label";
 
 interface VisitHistoryContentProps {
   patientId: string;
@@ -28,10 +30,11 @@ interface VisitHistoryContentProps {
 
 export function VisitHistoryContent({
   patientId,
-  userRole,
+  userRole: _userRole,
   data,
   searchQuery: initialSearchQuery,
 }: VisitHistoryContentProps) {
+  void _userRole;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = React.useState(initialSearchQuery || "");
@@ -40,20 +43,6 @@ export function VisitHistoryContent({
   const currentStatus = searchParams.get("status") || "all";
   const currentFrom = searchParams.get("from") || "";
   const currentTo = searchParams.get("to") || "";
-  const currentPage = parseInt(searchParams.get("page") || "1", 10);
-
-  // Format date for display
-  const formatDateTime = (date: Date | string) => {
-    const d = new Date(date);
-    return d.toLocaleString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  };
-
   // Format date for input (YYYY-MM-DD)
   const formatDateForInput = (date: string | null) => {
     if (!date) return "";
@@ -183,6 +172,12 @@ export function VisitHistoryContent({
         className: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500 dark:border-gray-400",
       };
     }
+    if (statusLower === "finalized" || statusLower === "signed_and_complete") {
+      return {
+        variant: "default" as const,
+        className: "bg-green-500 text-white border-green-600 dark:bg-green-600",
+      };
+    }
     return { variant: "outline" as const, className: "" };
   };
 
@@ -310,7 +305,7 @@ export function VisitHistoryContent({
                             const badge = getStatusBadge(visit.status);
                             return (
                               <Badge variant={badge.variant} className={badge.className}>
-                            {visit.status || "—"}
+                            {formatVisitStatusLabel(visit.status)}
                           </Badge>
                             );
                           })()}

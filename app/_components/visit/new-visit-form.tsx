@@ -280,10 +280,10 @@ export function NewVisitForm({
             // Use parseVisitNote which handles migration
             const parsedData = parseVisitNote(existingVisitData);
             form.reset(parsedData);
-            // Reset reviewed sections - user must view each section to mark it as reviewed
-            setReviewedSections(new Set());
-            // Expand all sections for easier navigation when editing
+            // Continue-note / edit path: do not block Save on section-review gate (audit P0).
+            // User can still step through sections; all are treated as reviewed for this visit.
             const sectionsForRole = getSectionsForRole(userRole);
+            setReviewedSections(new Set(sectionsForRole.map((s) => s.id)));
             setExpandedSections(new Set(sectionsForRole.map(s => s.id)));
             setVisitIdRemote(existingVisitId);
             setDraftLoaded(true);
@@ -1056,7 +1056,9 @@ export function NewVisitForm({
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-3xl font-bold text-foreground">New Visit</h1>
+            <h1 className="text-3xl font-bold text-foreground">
+              {existingVisitId ? "Continue Visit" : "New Visit"}
+            </h1>
             {isRecording && (
               <Badge variant="destructive" className="gap-2 animate-pulse">
                 <div className="w-2 h-2 bg-white rounded-full" />

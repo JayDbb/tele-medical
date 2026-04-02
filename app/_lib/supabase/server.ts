@@ -5,9 +5,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/app/_lib/db/drizzle/index";
 import { users } from "@/app/_lib/db/drizzle/schema";
 
-// Simple in-memory cache for rate limit state (per process)
-let lastRateLimitTime = 0;
-const RATE_LIMIT_COOLDOWN = 5000; // 5 seconds cooldown after rate limit
+// Track last Supabase auth rate-limit hit for logging only (do not block subsequent requests)
+let lastAuthRateLimitLogAt = 0;
 
 /**
  * Creates a Supabase client for use in server components and server actions.
@@ -60,17 +59,11 @@ export const createSupabaseServerClient = cache(async () => {
  * Gets the current user session from Supabase.
  * Returns the user object if authenticated, null otherwise.
  * 
- * Handles rate limiting gracefully by returning null if rate limited.
+ * On a single 429 from getUser(), returns null for that call only.
+ * Does not use a global cooldown that would make every RSC see "logged out" for several seconds.
  * Uses React cache() to deduplicate calls within the same request.
  */
 export const getServerSession = cache(async () => {
-  // Check if we're in a rate limit cooldown period
-  const now = Date.now();
-  if (now - lastRateLimitTime < RATE_LIMIT_COOLDOWN) {
-    // Silently return null during cooldown to avoid spam
-    return null;
-  }
-
   try {
     const supabase = await createSupabaseServerClient();
     const {
@@ -78,12 +71,11 @@ export const getServerSession = cache(async () => {
       error,
     } = await supabase.auth.getUser();
 
-    // Handle rate limiting
     if (error?.status === 429 || error?.code === "over_request_rate_limit" || error?.message?.includes("rate limit")) {
-      lastRateLimitTime = now;
-      // Don't log during cooldown to reduce spam
-      if (now - lastRateLimitTime >= RATE_LIMIT_COOLDOWN) {
-        console.warn("Supabase auth rate limit reached, entering cooldown");
+      const now = Date.now();
+      if (now - lastAuthRateLimitLogAt > 10_000) {
+        lastAuthRateLimitLogAt = now;
+        console.warn("Supabase auth rate limited on getUser(); retry on next navigation");
       }
       return null;
     }
@@ -112,14 +104,9 @@ export const getServerSession = cache(async () => {
       role,
       name,
     };
-  } catch (error: any) {
-    // Handle rate limiting or other errors gracefully
-    if (error?.status === 429 || error?.code === "over_request_rate_limit" || error?.message?.includes("rate limit")) {
-      lastRateLimitTime = now;
-      // Don't log during cooldown to reduce spam
-      if (now - lastRateLimitTime >= RATE_LIMIT_COOLDOWN) {
-        console.warn("Supabase auth rate limit reached, entering cooldown");
-      }
+  } catch (error: unknown) {
+    const err = error as { status?: number; code?: string; message?: string };
+    if (err?.status === 429 || err?.code === "over_request_rate_limit" || err?.message?.includes("rate limit")) {
       return null;
     }
     console.error("Error getting server session:", error);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/app/_lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Separator } from "@/components/ui/separator";
 
 export function SignInForm() {
-  const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -49,19 +49,15 @@ export function SignInForm() {
       }
 
       if (data.user) {
-        // Get user role from user metadata
-        const role = (data.user.user_metadata?.role as string) || "patient";
+        const requestedRedirect = searchParams.get("redirect");
+        const safeRedirect =
+          requestedRedirect && requestedRedirect.startsWith("/")
+            ? requestedRedirect
+            : "/";
 
-        // Redirect based on role
-        let redirectPath = "/"; // Default fallback
-        if (role === "doctor") {
-          redirectPath = "/waiting-room";
-        } else if (role === "nurse") {
-          redirectPath = "/patients";
-        }
-
-        router.push(redirectPath);
-        router.refresh();
+        // Use a full navigation so the server decides the post-login destination
+        // from the real session + DB role instead of stale client metadata.
+        window.location.assign(safeRedirect);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
@@ -142,7 +138,7 @@ export function SignInForm() {
           <div className="w-full">
             <Separator className="my-4" />
             <p className="text-center text-sm text-muted-foreground">
-              Don't have an account?{" "}
+              Don&apos;t have an account?{" "}
               <Link
                 href="/sign-up"
                 className="font-medium text-foreground hover:underline underline-offset-4"

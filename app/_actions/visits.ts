@@ -119,7 +119,7 @@ export async function finalizeVisitAction(
     throw new Error("Visit not found");
   }
 
-  // Get patient to check their clinician_id
+  // Assigned clinician on patient OR on visit (handoff: nurse may set patient; doctor assign sets both)
   const { patients } = await import("@/app/_lib/db/drizzle/schema");
   const patientResult = await db
     .select({ clinicianId: patients.clinicianId })
@@ -127,7 +127,12 @@ export async function finalizeVisitAction(
     .where(eq(patients.id, visit.patientId))
     .limit(1);
 
-  if (!patientResult[0] || patientResult[0].clinicianId !== user.id) {
+  const patientClinicianId = patientResult[0]?.clinicianId ?? null;
+  const visitClinicianId = visit.clinicianId ?? null;
+  const isAssignedClinician =
+    patientClinicianId === user.id || visitClinicianId === user.id;
+
+  if (!patientResult[0] || !isAssignedClinician) {
     throw new Error("Only the assigned clinician can sign this note");
   }
 

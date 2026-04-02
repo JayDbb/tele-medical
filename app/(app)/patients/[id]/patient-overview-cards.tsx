@@ -47,14 +47,162 @@ interface PatientOverviewCardsProps {
   userRole: string;
 }
 
-/**
- * Normalize JSONB data to array format
- */
-function normalizeJsonb(data: unknown): unknown[] {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (typeof data === "object") return Object.values(data);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeList(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) {
+    return data.filter(isRecord);
+  }
+
+  if (!isRecord(data)) {
+    return [];
+  }
+
+  if (Array.isArray(data.entries)) {
+    return data.entries.filter(isRecord);
+  }
+
   return [];
+}
+
+function normalizeAllergies(data: unknown) {
+  return normalizeList(data) as Array<{ name?: string; type?: string }>;
+}
+
+function normalizeMedications(data: unknown) {
+  return normalizeList(data) as Array<{
+    id?: string;
+    brandName?: string;
+    genericName?: string;
+    name?: string;
+    medication?: string;
+    dosage?: string;
+    frequency?: string;
+    status?: string;
+  }>;
+}
+
+function normalizeVitals(data: unknown) {
+  if (Array.isArray(data)) {
+    return data.filter(isRecord) as Array<{
+      id?: string;
+      date?: string;
+      bp?: string;
+      hr?: string;
+      temp?: string;
+      weight?: string;
+      height?: string;
+      bmi?: string;
+      spo2?: string;
+      rr?: string;
+    }>;
+  }
+
+  if (!isRecord(data)) {
+    return [];
+  }
+
+  if (Array.isArray(data.entries)) {
+    return data.entries.filter(isRecord) as Array<{
+      id?: string;
+      date?: string;
+      bp?: string;
+      hr?: string;
+      temp?: string;
+      weight?: string;
+      height?: string;
+      bmi?: string;
+      spo2?: string;
+      rr?: string;
+    }>;
+  }
+
+  if (
+    "bp" in data ||
+    "hr" in data ||
+    "temp" in data ||
+    "weight" in data ||
+    "height" in data ||
+    "bmi" in data ||
+    "spo2" in data ||
+    "rr" in data
+  ) {
+    return [data] as Array<{
+      id?: string;
+      date?: string;
+      bp?: string;
+      hr?: string;
+      temp?: string;
+      weight?: string;
+      height?: string;
+      bmi?: string;
+      spo2?: string;
+      rr?: string;
+    }>;
+  }
+
+  return Object.values(data).filter(
+    (value) =>
+      isRecord(value) &&
+      ("bp" in value || "hr" in value || "temp" in value || "weight" in value)
+  ) as Array<{
+    id?: string;
+    date?: string;
+    bp?: string;
+    hr?: string;
+    temp?: string;
+    weight?: string;
+    height?: string;
+    bmi?: string;
+    spo2?: string;
+    rr?: string;
+  }>;
+}
+
+function countSummaryItems(data: unknown) {
+  if (Array.isArray(data)) {
+    return data.length;
+  }
+
+  if (!isRecord(data)) {
+    return 0;
+  }
+
+  if (Array.isArray(data.entries)) {
+    return data.entries.length;
+  }
+
+  return Object.values(data).filter((value) => {
+    if (value === null || value === undefined) {
+      return false;
+    }
+
+    if (typeof value === "string") {
+      return value.trim() !== "";
+    }
+
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+
+    if (isRecord(value)) {
+      return Object.values(value).some((nestedValue) => {
+        if (typeof nestedValue === "string") {
+          return nestedValue.trim() !== "";
+        }
+
+        if (Array.isArray(nestedValue)) {
+          return nestedValue.length > 0;
+        }
+
+        return nestedValue !== null && nestedValue !== undefined;
+      });
+    }
+
+    return true;
+  }).length;
 }
 
 /**
@@ -116,34 +264,13 @@ export function PatientOverviewCards({
       router.push(joinUrl);
     }
   };
-  const allergies = normalizeJsonb(patient.allergies) as Array<{ name?: string; type?: string }>;
-  const medications = normalizeJsonb(patient.currentMedications) as Array<{
-    id?: string;
-    brandName?: string;
-    genericName?: string;
-    name?: string; // Legacy field
-    medication?: string; // Legacy field
-    dosage?: string;
-    frequency?: string;
-    status?: string;
-  }>;
-  // Vitals is an array of VitalEntry objects, get the most recent one
-  const vitalsArray = normalizeJsonb(patient.vitals) as Array<{
-    id?: string;
-    date?: string;
-    bp?: string;
-    hr?: string;
-    temp?: string;
-    weight?: string;
-    height?: string;
-    bmi?: string;
-    spo2?: string;
-    rr?: string;
-  }>;
-  const familyHistory = normalizeJsonb(patient.familyHistory);
-  const socialHistory = normalizeJsonb(patient.socialHistory);
-  const pastMedicalHistory = normalizeJsonb(patient.pastMedicalHistory);
-  const surgicalHistory = normalizeJsonb(patient.surgicalHistory);
+  const allergies = normalizeAllergies(patient.allergies);
+  const medications = normalizeMedications(patient.currentMedications);
+  const vitalsArray = normalizeVitals(patient.vitals);
+  const familyHistoryCount = countSummaryItems(patient.familyHistory);
+  const socialHistoryCount = countSummaryItems(patient.socialHistory);
+  const pastMedicalHistoryCount = countSummaryItems(patient.pastMedicalHistory);
+  const surgicalHistoryCount = countSummaryItems(patient.surgicalHistory);
 
   // Get the most recent vital entry (sorted by date, most recent first)
   const latestVital = vitalsArray.length > 0
@@ -368,19 +495,19 @@ export function PatientOverviewCards({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-muted-foreground mb-1">Family History</p>
-              <p className="text-lg font-semibold">{familyHistory.length}</p>
+              <p className="text-lg font-semibold">{familyHistoryCount}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Social History</p>
-              <p className="text-lg font-semibold">{socialHistory.length}</p>
+              <p className="text-lg font-semibold">{socialHistoryCount}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Surgical History</p>
-              <p className="text-lg font-semibold">{surgicalHistory.length}</p>
+              <p className="text-lg font-semibold">{surgicalHistoryCount}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Past Medical History</p>
-              <p className="text-lg font-semibold">{pastMedicalHistory.length}</p>
+              <p className="text-lg font-semibold">{pastMedicalHistoryCount}</p>
             </div>
           </div>
           <Separator />

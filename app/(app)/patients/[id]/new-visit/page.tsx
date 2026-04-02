@@ -59,6 +59,7 @@ export default async function NewVisitPage({
 
   return (
     <NewVisitForm
+      key={`${patientId}:${visitId || "new"}`}
       patientId={patientId}
       patientBasics={patientBasics}
       userId={user.id}

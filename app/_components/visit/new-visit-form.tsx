@@ -463,6 +463,22 @@ export function NewVisitForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewedSections.size, patientId, userId, userRole, draftLoaded]);
 
+  React.useEffect(() => {
+    if (!draftLoaded || !currentSection) {
+      return;
+    }
+
+    setReviewedSections((prev) => {
+      if (prev.has(currentSection)) {
+        return prev;
+      }
+
+      const updated = new Set(prev);
+      updated.add(currentSection);
+      return updated;
+    });
+  }, [currentSection, draftLoaded]);
+
   // Check if all visible sections (based on role) are reviewed
   const allSectionsReviewed = roleSections.every((s) => reviewedSections.has(s.id));
 

@@ -488,14 +488,32 @@ Schema:
     });
   } catch (error) {
     console.error("Parse audio error:", error);
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Internal server error";
+    const isTranscriptionUnavailable = errorMessage.includes(
+      "Audio transcription is unavailable"
+    );
+    const isOpenRouterUnavailable = errorMessage.includes(
+      "Missing OPENROUTER_API_KEY"
+    );
+
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Internal server error",
+        error: errorMessage,
+        code: isTranscriptionUnavailable
+          ? "TRANSCRIPTION_UNAVAILABLE"
+          : isOpenRouterUnavailable
+            ? "PARSING_UNAVAILABLE"
+            : "INTERNAL_ERROR",
         ...(process.env.NODE_ENV === "development" && {
           details: error instanceof Error ? error.stack : String(error),
         }),
       },
-      { status: 500 }
+      {
+        status:
+          isTranscriptionUnavailable || isOpenRouterUnavailable ? 503 : 500,
+      }
     );
   }
 }

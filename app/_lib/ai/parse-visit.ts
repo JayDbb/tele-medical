@@ -4,9 +4,9 @@ interface ParseVisitOptions {
   transcript: string;
   prompt?: string;
   patientContext?: {
-    allergies?: any[];
-    meds?: any[];
-    pmh?: any[];
+    allergies?: unknown[];
+    meds?: unknown[];
+    pmh?: unknown[];
   };
   previousTranscripts?: string[];
 }
@@ -102,7 +102,7 @@ function parseJsonWithFallback(content: string): unknown {
 
     try {
       return JSON.parse(jsonContent);
-    } catch (firstError) {
+    } catch {
       // Try removing duplicate keys
       jsonContent = removeDuplicateKeys(jsonContent);
       jsonContent = cleanJsonContent(jsonContent);
@@ -200,10 +200,7 @@ export async function parseVisitNoteFromTranscript(
   }
 
   const replicateApiKey = process.env.REPLICATE_API_KEY;
-
-  if (!replicateApiKey) {
-    throw new Error("Missing REPLICATE_API_KEY environment variable");
-  }
+  const openRouterApiKey = process.env.OPENROUTER_API_KEY;
 
   // Build the system prompt with schema
   const systemPrompt = `You are a medical assistant that extracts structured visit note data from transcripts. 
@@ -494,6 +491,57 @@ Schema:
   const combinedUserPrompt = `${basePrompt}\n\nNEW Transcript (takes precedence - extract all information from this):\n${transcript}\n\nNow extract all information from the transcript above and populate the JSON schema. Be thorough and extract ALL mentioned information including vitals, measurements, medications, diagnoses, point of care test results (diabetes, HIV, syphilis), etc.`;
 
   const fullPrompt = `${systemPrompt}\n\n${combinedUserPrompt}\n\nRemember: Return ONLY valid JSON with no comments, no duplicate keys, and no explanatory text. Just the raw JSON object starting with { and ending with }.`;
+
+  if (openRouterApiKey) {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openRouterApiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+        "X-Title": "Tele-Medical",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-120b",
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: combinedUserPrompt,
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+        max_tokens: 16000,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(
+        `OpenRouter API error: ${response.status} ${response.statusText} - ${errorText}`
+      );
+    }
+
+    const result = await response.json();
+    const content = result.choices?.[0]?.message?.content || "";
+
+    if (!content) {
+      throw new Error("OpenRouter returned empty response");
+    }
+
+    const parsed = parseJsonWithFallback(content);
+    return parseVisitNote(parsed);
+  }
+
+  if (!replicateApiKey) {
+    throw new Error(
+      "Missing AI provider configuration. Set OPENROUTER_API_KEY for transcript parsing or REPLICATE_API_KEY for Replicate."
+    );
+  }
 
   const deepSeekModel = "deepseek-ai/deepseek-v3.1";
 

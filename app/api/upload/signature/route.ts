@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/app/_lib/auth/get-current-user";
 import { uploadFile } from "@/app/_lib/storage";
+import { getDocumentsStorageBucket } from "@/app/_lib/storage/config";
 import { v4 as uuidv4 } from "uuid";
 
 /**
@@ -11,7 +12,7 @@ import { v4 as uuidv4 } from "uuid";
 export async function POST(request: NextRequest) {
   try {
     // Verify auth
-    const user = await requireUser(["doctor", "nurse"]);
+    await requireUser(["doctor", "nurse"]);
 
     const formData = await request.formData();
     const signature = formData.get("signature") as string; // base64 data URL
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
     const base64Data = signature.replace(/^data:image\/\w+;base64,/, "");
     const buffer = Buffer.from(base64Data, "base64");
 
-    const bucket = "tele-med-docs";
+    const bucket = getDocumentsStorageBucket();
 
     // Generate unique path: signatures/{patientId}/{uuid}-signature.png
     const uniqueId = uuidv4();

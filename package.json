@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "seed": "node ./scripts/seed.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

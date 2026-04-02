@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tele-Medical
 
-## Getting Started
+Tele-Medical is a Next.js 16 app for managing patients, visits, recordings, notes, and clinical documents with Supabase and Drizzle.
 
-First, run the development server:
+## Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Create your local environment file from the template:
+
+```bash
+copy .env.local.example .env.local
+```
+
+3. Fill in the Supabase and database values in `.env.local`.
+
+4. In Supabase Storage, create these buckets:
+
+- `telehealth_audio`
+- `tele-med-docs`
+
+5. Run the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Required:
 
-## Learn More
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `DATABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_APP_URL`
+- `STORAGE_BUCKET`
+- `DOCUMENTS_STORAGE_BUCKET`
 
-To learn more about Next.js, take a look at the following resources:
+Optional:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `REPLICATE_API_KEY`
+- `OPENROUTER_API_KEY`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Default bucket values expected by the app:
 
-## Deploy on Vercel
+- `STORAGE_BUCKET=telehealth_audio`
+- `DOCUMENTS_STORAGE_BUCKET=tele-med-docs`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Seed Demo Data
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Seed the database and demo auth users with:
+
+```bash
+npm run seed
+```
+
+Demo credentials created by the seed script:
+
+- `doctor.demo@telemedical.local` / `DemoPass123!`
+- `nurse.demo@telemedical.local` / `DemoPass123!`
+- `patient.demo@telemedical.local` / `DemoPass123!`
+
+## Notes
+
+- Audio chunks, finalized recordings, and transcription lookups now all use the same audio bucket configured by `STORAGE_BUCKET`.
+- Documents and signature uploads use `DOCUMENTS_STORAGE_BUCKET`.
+- `.env.local` is ignored by git. The committed setup template is `.env.local.example`.

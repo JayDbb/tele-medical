@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/app/_lib/auth/get-current-user";
 import { uploadFile } from "@/app/_lib/storage";
+import { getDocumentsStorageBucket } from "@/app/_lib/storage/config";
 import { v4 as uuidv4 } from "uuid";
 
 /**
@@ -11,7 +12,7 @@ import { v4 as uuidv4 } from "uuid";
 export async function POST(request: NextRequest) {
   try {
     // Verify auth
-    const user = await requireUser(["doctor", "nurse"]);
+    await requireUser(["doctor", "nurse"]);
 
     const formData = await request.formData();
     const file = formData.get("file") as File;
@@ -60,10 +61,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bucket = "tele-med-docs";
+    const bucket = getDocumentsStorageBucket();
 
     // Generate unique path: documents/{patientId}/{visitId?}/{uuid}-{filename}
-    const fileExtension = file.name.split(".").pop() || "";
     const uniqueId = uuidv4();
     const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const path = visitId

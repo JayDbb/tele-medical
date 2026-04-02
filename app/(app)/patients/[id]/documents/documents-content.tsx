@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, Trash2, Download, FileText, Image, File, Calendar, Eye, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  getPatientDocumentsAction,
   deleteDocumentAction,
   getDocumentSignedUrlAction,
   createDocumentAction,
@@ -49,6 +49,7 @@ export function DocumentsContent({
   patientName,
   documents: initialDocuments,
 }: DocumentsContentProps) {
+  const router = useRouter();
   const [documents, setDocuments] = React.useState<Document[]>(initialDocuments);
   const [showUploadModal, setShowUploadModal] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
@@ -58,6 +59,10 @@ export function DocumentsContent({
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    setDocuments(initialDocuments);
+  }, [initialDocuments]);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -129,6 +134,13 @@ export function DocumentsContent({
       }
 
       if (newDocuments.length > 0) {
+        setDocuments((prev) => {
+          const next = [...newDocuments, ...prev];
+          next.sort(
+            (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+          );
+          return next;
+        });
         toast.success(
           `Successfully uploaded ${newDocuments.length} document${newDocuments.length > 1 ? "s" : ""}`
         );
@@ -136,8 +148,7 @@ export function DocumentsContent({
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
-        // Refresh to get latest data
-        window.location.reload();
+        router.refresh();
       }
     } catch (error) {
       console.error("Error uploading document:", error);
@@ -160,9 +171,9 @@ export function DocumentsContent({
       if (!result.success) {
         throw new Error(result.error || "Failed to delete document");
       }
+      setDocuments((prev) => prev.filter((document) => document.id !== documentId));
       toast.success("Document deleted successfully");
-      // Refresh to get latest data
-      window.location.reload();
+      router.refresh();
     } catch (error) {
       console.error("Error deleting document:", error);
       toast.error(

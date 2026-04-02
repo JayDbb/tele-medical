@@ -95,8 +95,10 @@ export function VisitDetailsContent({
   const isSigned = visit.status === "Signed & Complete";
   const isInProgress = visit.status === "In Progress";
   const canEdit = isSigned || isInProgress; // Can edit if signed or in progress
-  // Check if current user is the patient's assigned clinician (not visit's clinician)
-  const isClinician = patient.clinicianId === currentUserId;
+  // Match server finalize rules: patient assignee OR visit row clinician
+  const canSignNote =
+    patient.clinicianId === currentUserId ||
+    visit.clinicianId === currentUserId;
 
   const handleEdit = async () => {
     if (!canEdit) return;
@@ -376,7 +378,7 @@ export function VisitDetailsContent({
               {isMarkingInProgress ? "Processing..." : "Edit Note"}
             </Button>
           )}
-          {isInProgress && !isSigned && isClinician && (
+          {isInProgress && !isSigned && canSignNote && (
             <Button onClick={handleSign} disabled={isSigning} variant="default">
               <FileSignature className="h-4 w-4 mr-2" />
               {isSigning ? "Signing..." : "Sign Note"}

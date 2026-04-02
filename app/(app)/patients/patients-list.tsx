@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { QRCodeSVG } from "qrcode.react";
 import { Input } from "@/components/ui/input";
-import { Video, QrCode, Copy, Check, Phone, Mail, Calendar, User, Pill, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Video, Copy, Check, Phone, Mail, Calendar, User, Pill, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import { formatDate, formatDateTime } from "@/app/_lib/utils/format-date";
 
 interface VisitInfo {
   id: string;
@@ -53,13 +54,14 @@ export function PatientsList({ patients, userRole }: PatientsListProps) {
 
   const PATIENTS_PER_PAGE = 3;
 
-  // Initialize search input from URL param on mount
+  // Initialize search input from URL param on mount (run once; URL param is fixed for this mount)
   React.useEffect(() => {
     const topBarSearch = document.getElementById("patients-search") as HTMLInputElement;
     if (topBarSearch && initialSearchQuery) {
       topBarSearch.value = initialSearchQuery;
       setSearchQuery(initialSearchQuery);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only URL → local state sync
   }, []);
 
   // Sync search with top bar search input
@@ -88,36 +90,6 @@ export function PatientsList({ patients, userRole }: PatientsListProps) {
       topBarSearch.value = searchQuery;
     }
   }, [searchQuery]);
-
-  const formatDate = (date: Date | null | string) => {
-    if (!date) return "N/A";
-    try {
-      const d = new Date(date);
-      return d.toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      });
-    } catch {
-      return "N/A";
-    }
-  };
-
-  const formatDateTime = (date: Date | null | string) => {
-    if (!date) return "N/A";
-    try {
-      const d = new Date(date);
-      return d.toLocaleString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-    } catch {
-      return "N/A";
-    }
-  };
 
   const calculateAge = (dob: string | Date | null) => {
     if (!dob) return null;
@@ -224,8 +196,8 @@ export function PatientsList({ patients, userRole }: PatientsListProps) {
   const endIndex = startIndex + PATIENTS_PER_PAGE;
   const paginatedPatients = filteredPatients.slice(startIndex, endIndex);
 
-  // Reset to page 1 when search changes
-  useMemo(() => {
+  // Reset to page 1 when search changes (must not use useMemo — side effects belong in useEffect)
+  React.useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery]);
 

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { getServerSession } from "@/app/_lib/supabase/server";
+import { db } from "@/app/_lib/db/drizzle/index";
+import { patients } from "@/app/_lib/db/drizzle/schema";
 import { getVisitById } from "@/app/_lib/db/drizzle/queries/visit";
 import {
   uploadFile,
@@ -92,7 +95,7 @@ export async function POST(
 
     const { visitId } = await params;
     const body = await request.json();
-    const { recordingSessionId, expectedChunkCount, mimeType } = body;
+    const { recordingSessionId, expectedChunkCount } = body;
 
     if (!recordingSessionId) {
       return NextResponse.json(
@@ -101,9 +104,20 @@ export async function POST(
       );
     }
 
-    // Verify visit and assignment
+    // Verify visit and assignment (align with finalizeVisitAction: visit OR patient assignee)
     const visit = await getVisitById(visitId);
-    if (!visit || visit.clinicianId !== session.id) {
+    if (!visit) {
+      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
+    }
+    const [patientRow] = await db
+      .select({ clinicianId: patients.clinicianId })
+      .from(patients)
+      .where(eq(patients.id, visit.patientId))
+      .limit(1);
+    const canFinalizeRecording =
+      visit.clinicianId === session.id ||
+      patientRow?.clinicianId === session.id;
+    if (!canFinalizeRecording) {
       return NextResponse.json(
         { error: "Not authorized for this visit" },
         { status: 403 }

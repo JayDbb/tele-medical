@@ -1,0 +1,271 @@
+{
+  "startedAt": "2026-04-01T19:58:32.799Z",
+  "marker": "WARROOM-2026-04-01T19:58:32.794Z",
+  "screenshots": [
+    "phase2_artifacts/1775073517592-nurse-login.png",
+    "phase2_artifacts/1775073519143-nurse-direct-landing-check.png",
+    "phase2_artifacts/1775073521324-nurse-patient-chart.png",
+    "phase2_artifacts/1775073521397-nurse-visit-history.png",
+    "phase2_artifacts/1775073523623-nurse-visit-history-direct.png",
+    "phase2_artifacts/1775073523713-nurse-visit-form.png",
+    "phase2_artifacts/1775073526111-nurse-visit-form-direct.png",
+    "phase2_artifacts/1775073526173-nurse-no-textarea.png",
+    "phase2_artifacts/1775073526215-nurse-save-disabled.png",
+    "phase2_artifacts/1775073530206-doctor-login.png",
+    "phase2_artifacts/1775073532032-doctor-direct-landing-check.png",
+    "phase2_artifacts/1775073532577-doctor-waiting-room-patient-check.png",
+    "phase2_artifacts/1775073532648-doctor-assigned-visit.png",
+    "phase2_artifacts/1775073534194-doctor-open-notes-fallback.png",
+    "phase2_artifacts/1775073534265-doctor-open-notes-continue.png"
+  ],
+  "steps": [
+    {
+      "time": "2026-04-01T19:58:37.618Z",
+      "actor": "nurse",
+      "startingUrl": "https://tele-medical.vercel.app/sign-in?redirect=%2F",
+      "action": "Sign in as nurse",
+      "expectedResult": "Role lands on /patients",
+      "actualResult": "Landed on /",
+      "pass": false,
+      "severity": "P0",
+      "screenshot": "phase2_artifacts/1775073517592-nurse-login.png"
+    },
+    {
+      "time": "2026-04-01T19:58:39.176Z",
+      "actor": "nurse",
+      "startingUrl": "/",
+      "action": "Direct-load expected landing route /patients",
+      "expectedResult": "Authenticated nurse can access /patients",
+      "actualResult": "Opened /patients; body preview=\"((a,b,c,d,e,f,g,h)=>{let i=document.documentElement,j=[\"light\",\"dark\"];function k(b){var c;(Array.isArray(a)?a:[a]).forEach(a=>{let c=\"class\"===a,d=c&&f?e.map(a...\"",
+      "pass": true,
+      "severity": "pass",
+      "screenshot": "phase2_artifacts/1775073519143-nurse-direct-landing-check.png"
+    },
+    {
+      "time": "2026-04-01T19:58:41.369Z",
+      "actor": "nurse",
+      "startingUrl": "/patients",
+      "action": "Open first patient card (Cora Mercer34 years oldDOB: Oct 12, 1991+119132938162wequfifon@mailinator.comLas...)",
+      "expectedResult": "Patient chart loads without redirect or 404",
+      "actualResult": "Opened /patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66 (Hello, Nurse Demo Nurse)",
+      "pass": true,
+      "severity": "pass",
+      "screenshot": "phase2_artifacts/1775073521324-nurse-patient-chart.png"
+    },
+    {
+      "time": "2026-04-01T19:58:41.427Z",
+      "actor": "nurse",
+      "startingUrl": "/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66",
+      "action": "Open Visit History",
+      "expectedResult": "Visit history route opens without 404",
+      "actualResult": "Opened /patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66",
+      "pass": false,
+      "severity": "P0",
+      "screenshot": "phase2_artifacts/1775073521397-nurse-visit-history.png"
+    },
+    {
+      "time": "2026-04-01T19:58:43.681Z",
+      "actor": "nurse",
+      "startingUrl": "/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/visit-history",
+      "action": "Direct-load visit history route",
+      "expectedResult": "Visit history route opens without 404",
+      "actualResult": "Opened /patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/visit-history",
+      "pass": true,
+      "severity": "pass",
+      "screenshot": "phase2_artifacts/1775073523623-nurse-visit-history-direct.png"
+    },
+    {
+      "time": "2026-04-01T19:58:43.742Z",
+      "actor": "nurse",
+      "startingUrl": "/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/visit-history",
+      "action": "Open visit editor via Log New Visit",
+      "expectedResult": "Visit form loads without redirect",
+      "actualResult": "Opened /patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/visit-history",
+      "pass": false,
+      "severity": "P0",
+      "screenshot": "phase2_artifacts/1775073523713-nurse-visit-form.png"
+    },
+    {
+      "time": "2026-04-01T19:58:46.172Z",
+      "actor": "nurse",
+      "startingUrl": "/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/new-visit",
+      "action": "Direct-load new-visit route",
+      "expectedResult": "Visit form loads without redirect",
+      "actualResult": "Opened /patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/new-visit",
+      "pass": true,
+      "severity": "pass",
+      "screenshot": "phase2_artifacts/1775073526111-nurse-visit-form-direct.png"
+    },
+    {
+      "time": "2026-04-01T19:58:46.211Z",
+      "actor": "nurse",
+      "startingUrl": "/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/new-visit",
+      "action": "Edit note content",
+      "expectedResult": "At least one editable note textarea is available",
+      "actualResult": "No visible textarea found on the visit form",
+      "pass": false,
+      "severity": "P1",
+      "screenshot": "phase2_artifacts/1775073526173-nurse-no-textarea.png"
+    },
+    {
+      "time": "2026-04-01T19:58:46.243Z",
+      "actor": "nurse",
+      "startingUrl": "/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/new-visit",
+      "action": "Save visit",
+      "expectedResult": "Save button is enabled for the chosen workflow",
+      "actualResult": "Save button is visible but disabled",
+      "pass": false,
+      "severity": "P0",
+      "screenshot": "phase2_artifacts/1775073526215-nurse-save-disabled.png"
+    },
+    {
+      "time": "2026-04-01T19:58:50.250Z",
+      "actor": "doctor",
+      "startingUrl": "https://tele-medical.vercel.app/sign-in?redirect=%2F",
+      "action": "Sign in as doctor",
+      "expectedResult": "Role lands on /waiting-room",
+      "actualResult": "Landed on /",
+      "pass": false,
+      "severity": "P0",
+      "screenshot": "phase2_artifacts/1775073530206-doctor-login.png"
+    },
+    {
+      "time": "2026-04-01T19:58:52.062Z",
+      "actor": "doctor",
+      "startingUrl": "/",
+      "action": "Direct-load expected landing route /waiting-room",
+      "expectedResult": "Authenticated doctor can access /waiting-room",
+      "actualResult": "Opened /waiting-room; body preview=\"((a,b,c,d,e,f,g,h)=>{let i=document.documentElement,j=[\"light\",\"dark\"];function k(b){var c;(Array.isArray(a)?a:[a]).forEach(a=>{let c=\"class\"===a,d=c&&f?e.map(a...\"",
+      "pass": true,
+      "severity": "pass",
+      "screenshot": "phase2_artifacts/1775073532032-doctor-direct-landing-check.png"
+    },
+    {
+      "time": "2026-04-01T19:58:52.614Z",
+      "actor": "doctor",
+      "startingUrl": "/waiting-room",
+      "action": "Locate handoff patient in waiting room (Cora Mercer)",
+      "expectedResult": "Doctor sees the intended handoff patient in waiting room",
+      "actualResult": "patientVisible=true; assignVisible=true",
+      "pass": true,
+      "severity": "pass",
+      "screenshot": "phase2_artifacts/1775073532577-doctor-waiting-room-patient-check.png"
+    },
+    {
+      "time": "2026-04-01T19:58:52.678Z",
+      "actor": "doctor",
+      "startingUrl": "/waiting-room",
+      "action": "Assign patient to doctor from waiting room",
+      "expectedResult": "Doctor is routed into the patient visit workflow",
+      "actualResult": "Opened /waiting-room",
+      "pass": false,
+      "severity": "P0",
+      "screenshot": "phase2_artifacts/1775073532648-doctor-assigned-visit.png"
+    },
+    {
+      "time": "2026-04-01T19:58:54.223Z",
+      "actor": "doctor",
+      "startingUrl": "/waiting-room",
+      "action": "Fallback to /open-notes after waiting-room assignment failure",
+      "expectedResult": "Doctor can reach open notes and see at least one continue path",
+      "actualResult": "Opened /open-notes; continueVisible=true",
+      "pass": true,
+      "severity": "pass",
+      "screenshot": "phase2_artifacts/1775073534194-doctor-open-notes-fallback.png"
+    },
+    {
+      "time": "2026-04-01T19:58:54.288Z",
+      "actor": "doctor",
+      "startingUrl": "/open-notes",
+      "action": "Continue note from open notes",
+      "expectedResult": "Doctor reaches editable visit form from open notes",
+      "actualResult": "Opened /open-notes",
+      "pass": false,
+      "severity": "P0",
+      "screenshot": "phase2_artifacts/1775073534265-doctor-open-notes-continue.png"
+    }
+  ],
+  "console": [
+    {
+      "actor": "nurse",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 ()",
+      "url": "/sign-in?redirect=%2F"
+    },
+    {
+      "actor": "nurse",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 ()",
+      "url": "/sign-in?redirect=%2F"
+    },
+    {
+      "actor": "doctor",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 ()",
+      "url": "/sign-in?redirect=%2F"
+    },
+    {
+      "actor": "doctor",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 ()",
+      "url": "/sign-in?redirect=%2F"
+    },
+    {
+      "actor": "doctor",
+      "type": "error",
+      "text": "Error assigning visit: TypeError: Failed to fetch\n    at O (https://tele-medical.vercel.app/_next/static/chunks/6dad3f0875474073.js:1:76036)",
+      "url": "/waiting-room"
+    }
+  ],
+  "networkFailures": [
+    {
+      "actor": "nurse",
+      "status": 404,
+      "url": "https://tele-medical.vercel.app/sign-up?_rsc=7dz3b"
+    },
+    {
+      "actor": "nurse",
+      "status": 404,
+      "url": "https://tele-medical.vercel.app/reset-password?_rsc=7dz3b"
+    },
+    {
+      "actor": "doctor",
+      "status": 404,
+      "url": "https://tele-medical.vercel.app/sign-up?_rsc=7dz3b"
+    },
+    {
+      "actor": "doctor",
+      "status": 404,
+      "url": "https://tele-medical.vercel.app/reset-password?_rsc=7dz3b"
+    }
+  ],
+  "pageErrors": [
+    {
+      "actor": "nurse",
+      "url": "/patients",
+      "error": "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+    },
+    {
+      "actor": "nurse",
+      "url": "/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/visit-history",
+      "error": "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+    },
+    {
+      "actor": "doctor",
+      "url": "/open-notes",
+      "error": "Minified React error #418; visit https://react.dev/errors/418?args[]=text&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings."
+    }
+  ],
+  "patient": {
+    "id": "cdfc2a9e-680b-406b-85b9-82d3d7274c66",
+    "url": "https://tele-medical.vercel.app/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66",
+    "name": "Cora Mercer",
+    "label": "Hello, Nurse Demo Nurse"
+  },
+  "nurseVisit": {
+    "mode": "Log New Visit",
+    "url": "https://tele-medical.vercel.app/patients/cdfc2a9e-680b-406b-85b9-82d3d7274c66/new-visit",
+    "visitId": null
+  },
+  "finishedAt": "2026-04-01T19:58:54.330Z"
+}

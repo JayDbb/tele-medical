@@ -12,6 +12,7 @@ import { FileText, Clock, User, Video, Copy, Check, QrCode } from "lucide-react"
 import { formatDateTime } from "@/app/_lib/utils/format-date";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
+import { formatVisitStatusLabel } from "@/app/_lib/utils/visit-status-label";
 
 interface OpenVisit {
   id: string;
@@ -102,6 +103,12 @@ export function OpenNotesContent({ visits }: OpenNotesContentProps) {
       return {
         variant: "secondary" as const,
         className: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500 dark:border-gray-400",
+      };
+    }
+    if (statusLower === "finalized" || statusLower === "signed_and_complete") {
+      return {
+        variant: "default" as const,
+        className: "bg-green-500 text-white border-green-600 dark:bg-green-600",
       };
     }
     return { variant: "outline" as const, className: "" };
@@ -196,7 +203,7 @@ export function OpenNotesContent({ visits }: OpenNotesContentProps) {
 
                   <div className="flex items-center gap-2">
                     <Badge variant={statusBadge.variant} className={statusBadge.className}>
-                      {visit.status || "—"}
+                      {formatVisitStatusLabel(visit.status)}
                     </Badge>
                   </div>
 

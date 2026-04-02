@@ -11,10 +11,6 @@ const publicRoutes = ["/sign-in", "/sign-up", "/reset-password"];
  */
 const authRoutes = ["/sign-in", "/sign-up", "/reset-password"];
 
-// Simple rate limit cooldown tracking
-let lastRateLimitTime = 0;
-const RATE_LIMIT_COOLDOWN = 10000; // 10 seconds cooldown after rate limit
-
 /**
  * Middleware to handle authentication and route protection.
  * - Unauthenticated users accessing protected routes are redirected to /sign-in
@@ -47,45 +43,33 @@ export async function middleware(request: NextRequest) {
     let isAuthenticated = false;
     let user = null;
 
-    // Skip auth check if we're in a rate limit cooldown period
-    const now = Date.now();
-    const inCooldown = now - lastRateLimitTime < RATE_LIMIT_COOLDOWN;
+    try {
+      const {
+        data: { user: authUser },
+        error,
+      } = await supabase.auth.getUser();
 
-    if (!inCooldown) {
-      try {
-        const {
-          data: { user: authUser },
-          error,
-        } = await supabase.auth.getUser();
-
-        // Handle rate limiting gracefully - allow request through if rate limited
-        if (
-          error?.status === 429 ||
-          error?.code === "over_request_rate_limit" ||
-          error?.message?.includes("rate limit")
-        ) {
-          lastRateLimitTime = now;
-          // Silently allow request through - don't log to reduce spam
-          // Treat as unauthenticated to avoid redirect loops
-          return response;
-        }
-
-        user = authUser;
-        isAuthenticated = !!user && !error;
-      } catch (authError: any) {
-        // Handle rate limiting or other auth errors
-        if (
-          authError?.status === 429 ||
-          authError?.code === "over_request_rate_limit" ||
-          authError?.message?.includes("rate limit")
-        ) {
-          lastRateLimitTime = now;
-          // Silently allow request through - don't log to reduce spam
-          return response;
-        }
-        // For other errors, treat as unauthenticated
-        isAuthenticated = false;
+      // Rate limited: allow request through with existing cookies; avoid forcing /sign-in
+      if (
+        error?.status === 429 ||
+        error?.code === "over_request_rate_limit" ||
+        error?.message?.includes("rate limit")
+      ) {
+        return response;
       }
+
+      user = authUser;
+      isAuthenticated = !!user && !error;
+    } catch (authError: unknown) {
+      const ae = authError as { status?: number; code?: string; message?: string };
+      if (
+        ae?.status === 429 ||
+        ae?.code === "over_request_rate_limit" ||
+        ae?.message?.includes("rate limit")
+      ) {
+        return response;
+      }
+      isAuthenticated = false;
     }
 
     // If user is authenticated and trying to access auth pages, redirect to role-specific page

@@ -160,6 +160,7 @@ export interface FormDraft {
 
 // Singleton instance
 let dbInstance: OfflineDB | null = null;
+let dbFailed = false;
 
 export function getOfflineDB(): OfflineDB {
   if (typeof window === "undefined") {
@@ -168,7 +169,39 @@ export function getOfflineDB(): OfflineDB {
 
   if (!dbInstance) {
     dbInstance = new OfflineDB();
+
+    // Attempt to open and handle IndexedDB failures gracefully.
+    // If the backing store is corrupt, delete and recreate the database.
+    dbInstance.open().catch(async (err) => {
+      console.warn("OfflineDB failed to open, attempting to reset:", err);
+      dbFailed = true;
+      try {
+        if (dbInstance) {
+          dbInstance.close();
+        }
+        await Dexie.delete("TeleMedicalOfflineDB");
+        dbInstance = new OfflineDB();
+        await dbInstance.open();
+        dbFailed = false;
+        console.info("OfflineDB reset successfully");
+      } catch (resetErr) {
+        console.error("OfflineDB reset failed — offline features disabled:", resetErr);
+        dbInstance = null;
+      }
+    });
+  }
+
+  if (!dbInstance) {
+    throw new Error("OfflineDB is unavailable — IndexedDB could not be opened");
   }
 
   return dbInstance;
+}
+
+/**
+ * Check whether the offline DB is available.
+ * Callers can use this to skip offline operations gracefully.
+ */
+export function isOfflineDBAvailable(): boolean {
+  return dbInstance !== null && !dbFailed;
 }

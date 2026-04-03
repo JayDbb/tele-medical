@@ -69,11 +69,11 @@ export function PatientChartShell({
                                 Begin Intake
                             </Button>
                         )} */}
-                        <Link href={getNewVisitPath()}>
-                            <Button size="default">
+                        <Button size="default" asChild>
+                            <Link href={getNewVisitPath()}>
                                 Log New Visit
-                            </Button>
-                        </Link>
+                            </Link>
+                        </Button>
                     </div>
                 </div>
 

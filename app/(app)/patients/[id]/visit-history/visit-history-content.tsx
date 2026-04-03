@@ -196,11 +196,11 @@ export function VisitHistoryContent({
             Review previous visits for this patient.
           </p>
         </div>
-        <Link href={getNewVisitPath()}>
-          <Button>
+        <Button asChild>
+          <Link href={getNewVisitPath()}>
             Log New Visit
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
 
       {/* Filters Row */}

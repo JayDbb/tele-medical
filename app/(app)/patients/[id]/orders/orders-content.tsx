@@ -28,29 +28,33 @@ export function OrdersContent({
   const [selectedType, setSelectedType] = React.useState<OrderType>("all");
 
   // Calculate summary statistics
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  const ordersToday = orders.filter(order => {
-    const orderDate = order.dateOrdered ? new Date(order.dateOrdered) : order.visitDate;
-    orderDate.setHours(0, 0, 0, 0);
-    return orderDate.getTime() === today.getTime();
-  });
+  const { ordersToday, pendingApproval, statOrders, completed } = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-  const pendingApproval = orders.filter(order => 
-    order.status?.toLowerCase().includes("pending") || 
-    order.status?.toLowerCase().includes("approval")
-  );
+    const ordersToday = orders.filter(order => {
+      const orderDate = order.dateOrdered ? new Date(order.dateOrdered) : new Date(order.visitDate);
+      orderDate.setHours(0, 0, 0, 0);
+      return orderDate.getTime() === today.getTime();
+    });
 
-  const statOrders = orders.filter(order => 
-    order.priority?.toLowerCase() === "stat" ||
-    order.priority?.toLowerCase() === "urgent"
-  );
+    const pendingApproval = orders.filter(order =>
+      order.status?.toLowerCase().includes("pending") ||
+      order.status?.toLowerCase().includes("approval")
+    );
 
-  const completed = orders.filter(order => 
-    order.status?.toLowerCase().includes("completed") ||
-    order.status?.toLowerCase().includes("fulfilled")
-  );
+    const statOrders = orders.filter(order =>
+      order.priority?.toLowerCase() === "stat" ||
+      order.priority?.toLowerCase() === "urgent"
+    );
+
+    const completed = orders.filter(order =>
+      order.status?.toLowerCase().includes("completed") ||
+      order.status?.toLowerCase().includes("fulfilled")
+    );
+
+    return { ordersToday, pendingApproval, statOrders, completed };
+  }, [orders]);
 
   // Filter orders based on type and search
   const filteredOrders = React.useMemo(() => {
